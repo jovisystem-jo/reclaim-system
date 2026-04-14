@@ -1,0 +1,239 @@
+:root {
+    --primary-yellow: #FFD700;
+    --primary-orange: #FF8C00;
+    --dark-orange: #FF6B00;
+    --light-yellow: #FFF9C4;
+    --gradient: linear-gradient(135deg, var(--primary-yellow) 0%, var(--primary-orange) 100%);
+    --gradient-dark: linear-gradient(135deg, var(--primary-orange) 0%, var(--dark-orange) 100%);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #FFF9E6 0%, #FFE4B5 100%);
+    min-height: 100vh;
+}
+
+/* Navbar */
+.navbar {
+    background: var(--gradient);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    padding: 1rem 2rem;
+}
+
+.navbar-brand {
+    font-size: 1.8rem;
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+}
+
+.nav-link {
+    color: #fff !important;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.nav-link:hover {
+    transform: translateY(-2px);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Cards */
+.card {
+    border: none;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    transition: transform 0.3s, box-shadow 0.3s;
+    background: white;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+}
+
+.card-header {
+    background: var(--gradient);
+    color: white;
+    border-radius: 15px 15px 0 0 !important;
+    padding: 1rem;
+    font-weight: bold;
+}
+
+/* Buttons */
+.btn-primary {
+    background: var(--gradient);
+    border: none;
+    color: white;
+    padding: 10px 25px;
+    border-radius: 25px;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-primary:hover {
+    background: var(--gradient-dark);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(255,140,0,0.3);
+}
+
+.btn-outline-primary {
+    border: 2px solid var(--primary-orange);
+    color: var(--primary-orange);
+    border-radius: 25px;
+    font-weight: 600;
+}
+
+.btn-outline-primary:hover {
+    background: var(--gradient);
+    border-color: transparent;
+    color: white;
+}
+
+/* Dashboard Stats */
+.stat-card {
+    background: var(--gradient);
+    color: white;
+    padding: 1.5rem;
+    border-radius: 15px;
+    text-align: center;
+}
+
+.stat-card i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.stat-card h3 {
+    font-size: 2rem;
+    margin: 0;
+}
+
+/* Search Bar */
+.search-box {
+    background: white;
+    border-radius: 50px;
+    padding: 5px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+}
+
+.search-box input {
+    border: none;
+    padding: 15px 20px;
+    border-radius: 50px;
+    width: 80%;
+}
+
+.search-box button {
+    background: var(--gradient);
+    border: none;
+    border-radius: 50px;
+    padding: 15px 30px;
+    color: white;
+    font-weight: bold;
+}
+
+/* Image Upload */
+.image-upload {
+    border: 2px dashed var(--primary-orange);
+    border-radius: 15px;
+    padding: 2rem;
+    text-align: center;
+    background: var(--light-yellow);
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.image-upload:hover {
+    background: #FFF3D4;
+    border-color: var(--dark-orange);
+}
+
+/* Notifications */
+.notification-badge {
+    position: relative;
+}
+
+.notification-count {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: red;
+    color: white;
+    border-radius: 50%;
+    padding: 2px 6px;
+    font-size: 12px;
+}
+
+.notification-dropdown {
+    width: 350px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.notification-item {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+.notification-item.unread {
+    background: var(--light-yellow);
+}
+
+.notification-item:hover {
+    background: #f5f5f5;
+}
+
+/* Footer */
+.footer {
+    background: var(--gradient-dark);
+    color: white;
+    text-align: center;
+    padding: 2rem;
+    margin-top: auto;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .navbar-brand {
+        font-size: 1.2rem;
+    }
+    
+    .stat-card h3 {
+        font-size: 1.5rem;
+    }
+    
+    .search-box input {
+        width: 70%;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-out;
+}
+
+/* Status badges */
+.badge-lost { background: #dc3545; color: white; }
+.badge-found { background: #28a745; color: white; }
+.badge-claimed { background: #ffc107; color: #333; }
+.badge-returned { background: #17a2b8; color: white; }
+.badge-resolved { background: #6c757d; color: white; }
