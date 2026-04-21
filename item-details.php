@@ -1,10 +1,9 @@
 <?php
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-session_start();
-
 // Use absolute paths
 define('BASE_PATH', __DIR__);
+require_once BASE_PATH . '/includes/security.php';
+configureErrorHandling();
+secureSessionStart();
 require_once BASE_PATH . '/config/database.php';
 require_once BASE_PATH . '/includes/header.php';
 require_once BASE_PATH . '/includes/functions.php';
@@ -22,7 +21,7 @@ $db = Database::getInstance()->getConnection();
 
 // Get item details
 $stmt = $db->prepare("
-    SELECT i.*, u.name as reporter_name, u.email as reporter_email, u.phone as reporter_phone
+    SELECT i.*, u.name as reporter_name
     FROM items i
     LEFT JOIN users u ON i.reported_by = u.user_id
     WHERE i.item_id = ?
@@ -68,7 +67,7 @@ function formatTimeOnly($dateTime) {
 $base_url = '/reclaim-system/';
 ?>
 
-<div class="container mt-4">
+<div class="container content-wrapper">
     <nav aria-label="breadcrumb" class="fade-in">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="<?= $base_url ?>index.php">Home</a></li>
@@ -110,7 +109,7 @@ $base_url = '/reclaim-system/';
                     <h5 class="mb-0"><i class="fas fa-user-circle" style="color: #FF6B35;"></i> Reported By</h5>
                 </div>
                 <div class="card-body">
-                    <div class="d-flex align-items-center mb-3">
+                    <div class="d-flex align-items-center">
                         <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" style="width: 50px; height: 50px;">
                             <i class="fas fa-user fa-2x" style="color: #FF6B35;"></i>
                         </div>
@@ -119,7 +118,6 @@ $base_url = '/reclaim-system/';
                             <small class="text-muted">Reporter ID: #<?= $item['reported_by'] ?></small>
                         </div>
                     </div>
-                    
                 </div>
             </div>
             <?php endif; ?>
@@ -211,15 +209,31 @@ $base_url = '/reclaim-system/';
                             </div>
                         </div>
                         
-                        <!-- Location Found/Lost -->
+                        <!-- Brand -->
                         <div class="col-md-6">
                             <div class="bg-light rounded p-3">
-                                <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i> 
-                                    <?= $item['status'] == 'lost' ? 'Location Lost' : 'Location Found' ?>
-                                </small>
+                                <small class="text-muted d-block"><i class="fas fa-trademark me-1"></i> Brand</small>
+                                <strong><?= htmlspecialchars($item['brand'] ?? 'Not specified') ?></strong>
+                            </div>
+                        </div>
+                        
+                        <!-- Color -->
+                        <div class="col-md-6">
+                            <div class="bg-light rounded p-3">
+                                <small class="text-muted d-block"><i class="fas fa-palette me-1"></i> Color</small>
+                                <strong><?= htmlspecialchars($item['color'] ?? 'Not specified') ?></strong>
+                            </div>
+                        </div>
+                        
+                        <!-- Location Found/Lost - Only show for lost items -->
+                        <?php if ($item['status'] == 'lost'): ?>
+                        <div class="col-md-6">
+                            <div class="bg-light rounded p-3">
+                                <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i> Location Lost</small>
                                 <strong><?= htmlspecialchars($item['found_location'] ?? 'Not specified') ?></strong>
                             </div>
                         </div>
+                        <?php endif; ?>
                         
                         <!-- Keep At / Collection Point (Only for Found Items) -->
                         <?php if ($item['status'] == 'found' && !empty($item['delivery_location'])): ?>
@@ -357,7 +371,61 @@ $base_url = '/reclaim-system/';
                 </div>
             </div>
             
-            
+            <!-- Timeline Information Card -->
+            <div class="card border-0 shadow-sm mt-4 fade-in">
+                <div class="card-header bg-white border-0 pt-3">
+                    <h5 class="mb-0"><i class="fas fa-info-circle" style="color: #FF6B35;"></i> Timeline Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="timeline">
+                        <div class="timeline-item">
+                            <div class="timeline-icon bg-danger">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                            <div class="timeline-content">
+                                <h6><?= $item['status'] == 'lost' ? 'Item Lost' : 'Item Found' ?></h6>
+                                <p class="mb-0">
+                                    <strong><?= formatDateTime($item['date_found']) ?></strong>
+                                    <span class="text-muted">(<?= timeAgo($item['date_found']) ?>)</span>
+                                </p>
+                                <?php if ($item['status'] == 'lost'): ?>
+                                    <small class="text-muted">Location: <?= htmlspecialchars($item['found_location'] ?? 'Not specified') ?></small>
+                                <?php endif; ?>
+                                <?php if ($item['status'] == 'found' && !empty($item['delivery_location'])): ?>
+                                    <small class="text-muted">Keep at: <?= htmlspecialchars($item['delivery_location']) ?></small>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <div class="timeline-item">
+                            <div class="timeline-icon bg-success">
+                                <i class="fas fa-flag-checkered"></i>
+                            </div>
+                            <div class="timeline-content">
+                                <h6>Reported to System</h6>
+                                <p class="mb-0">
+                                    <strong><?= formatDateTime($item['reported_date'] ?? $item['created_at']) ?></strong>
+                                    <span class="text-muted">(<?= timeAgo($item['reported_date'] ?? $item['created_at']) ?>)</span>
+                                </p>
+                                <small class="text-muted">Reported by: <?= htmlspecialchars($item['reporter_name'] ?? 'Anonymous') ?></small>
+                            </div>
+                        </div>
+                        <?php if($claim_count > 0): ?>
+                        <div class="timeline-item">
+                            <div class="timeline-icon bg-warning">
+                                <i class="fas fa-hand-paper"></i>
+                            </div>
+                            <div class="timeline-content">
+                                <h6>Claims Submitted</h6>
+                                <p class="mb-0">
+                                    <strong><?= $claim_count ?> claim(s)</strong> have been submitted for this item
+                                </p>
+                                <small class="text-muted">Awaiting verification</small>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -434,6 +502,7 @@ $base_url = '/reclaim-system/';
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <form action="<?= $base_url ?>user/submit-claim.php" method="POST" enctype="multipart/form-data">
+                <?= csrf_field() ?>
                 <div class="modal-body">
                     <input type="hidden" name="item_id" id="claim_item_id">
                     

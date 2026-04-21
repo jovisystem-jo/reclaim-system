@@ -9,6 +9,9 @@ $success = '';
 $error = '';
 
 $base_url = '/reclaim-system/';
+if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
+    define('RECLAIM_EMBEDDED_LAYOUT', true);
+}
 
 // Get user data
 $stmt = $db->prepare("SELECT * FROM users WHERE user_id = ?");
@@ -37,6 +40,8 @@ $stmt->execute([$userID, $userID]);
 $activities = $stmt->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_token();
+
     $name = trim($_POST['name'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $department = trim($_POST['department'] ?? '');
@@ -87,7 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } catch (PDOException $e) {
-            $error = 'Database error: ' . $e->getMessage();
+            error_log("User profile database error: " . $e->getMessage());
+            $error = 'Unable to update profile. Please try again.';
         }
     }
 }
@@ -349,10 +355,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     </style>
 </head>
-<body>
+<body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
     
-    <div class="container mt-4">
+    <main class="page-shell page-shell--compact">
+    <div class="container content-wrapper">
         <!-- Profile Header -->
         <div class="profile-header fade-in">
             <div class="row align-items-center">
@@ -497,6 +504,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endif; ?>
                         
                         <form method="POST" action="" id="profileForm">
+                            <?= csrf_field() ?>
                             <div class="row">
                                 <div class="col-md-12 mb-3">
                                     <label class="form-label required-field">
@@ -640,6 +648,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
     
+    </main>
+
     <?php include __DIR__ . '/../includes/footer.php'; ?>
     
     <script>
@@ -690,8 +700,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
             deleteBtn.disabled = true;
             
-            // Redirect to delete endpoint
-            window.location.href = '<?= $base_url ?>api/delete-account.php';
+            // Security: submit account deletion as POST with a CSRF token.
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '<?= $base_url ?>api/delete-account.php';
+            const token = document.createElement('input');
+            token.type = 'hidden';
+            token.name = 'csrf_token';
+            token.value = '<?= csrf_token() ?>';
+            form.appendChild(token);
+            const confirmation = document.createElement('input');
+            confirmation.type = 'hidden';
+            confirmation.name = 'confirm_delete';
+            confirmation.value = confirmText;
+            form.appendChild(confirmation);
+            document.body.appendChild(form);
+            form.submit();
         }
     } else {
         alert('Please type DELETE to confirm account deletion');

@@ -1,4 +1,14 @@
 <?php
+require_once 'includes/security.php';
+configureErrorHandling();
+
+// Security: installer should only run from localhost.
+$remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+if (!in_array($remoteAddr, ['127.0.0.1', '::1'], true)) {
+    http_response_code(403);
+    exit('Installer is only available from localhost.');
+}
+
 echo "<h1>Reclaim System Installation</h1>";
 echo "<pre>";
 
@@ -6,15 +16,15 @@ echo "<pre>";
 if (version_compare(PHP_VERSION, '7.4.0', '<')) {
     die("PHP 7.4 or higher is required. You have " . PHP_VERSION);
 }
-echo "✓ PHP version: " . PHP_VERSION . "\n";
+echo "[OK] PHP version: " . PHP_VERSION . "\n";
 
 // Check extensions
 $required_extensions = ['pdo_mysql', 'mysqli', 'gd', 'fileinfo', 'json'];
 foreach ($required_extensions as $ext) {
     if (extension_loaded($ext)) {
-        echo "✓ $ext extension loaded\n";
+        echo "[OK] $ext extension loaded\n";
     } else {
-        echo "✗ $ext extension missing\n";
+        echo "[MISSING] $ext extension missing\n";
         $error = true;
     }
 }
@@ -24,37 +34,43 @@ require_once 'config/database.php';
 
 try {
     $db = Database::getInstance()->getConnection();
-    
-    // Read SQL file
+
+    if (!file_exists('reclaim_system.sql')) {
+        die("Database setup file reclaim_system.sql was not found.\n");
+    }
+
     $sql = file_get_contents('reclaim_system.sql');
-    
-    // Split SQL statements
     $statements = explode(';', $sql);
-    
+
     foreach ($statements as $statement) {
         $statement = trim($statement);
         if (!empty($statement)) {
             $db->exec($statement);
         }
     }
-    
-    echo "✓ Database tables created successfully\n";
-    
+
+    echo "[OK] Database tables created successfully\n";
+
     // Check if admin exists
     $stmt = $db->query("SELECT COUNT(*) FROM users WHERE role = 'admin'");
     if ($stmt->fetchColumn() == 0) {
-        // Create default admin
-        $default_password = password_hash('admin123', PASSWORD_DEFAULT);
-        $stmt = $db->prepare("
-            INSERT INTO users (username, name, email, password_hash, role, is_active) 
-            VALUES (?, ?, ?, ?, 'admin', 1)
-        ");
-        $stmt->execute(['admin', 'Administrator', 'admin@reclaim.com', $default_password]);
-        echo "✓ Default admin created (username: admin, password: admin123)\n";
+        // Security: do not create or print a default password.
+        $adminPassword = getenv('INSTALL_ADMIN_PASSWORD') ?: '';
+        if ($adminPassword !== '') {
+            $adminHash = password_hash($adminPassword, PASSWORD_DEFAULT);
+            $stmt = $db->prepare("
+                INSERT INTO users (username, name, email, password, role, is_active)
+                VALUES (?, ?, ?, ?, 'admin', 1)
+            ");
+            $stmt->execute(['admin', 'Administrator', 'admin@reclaim.com', $adminHash]);
+            echo "[OK] Admin account created from INSTALL_ADMIN_PASSWORD\n";
+        } else {
+            echo "[OK] No default admin password created. Set INSTALL_ADMIN_PASSWORD to create the first admin.\n";
+        }
     }
-    
 } catch (PDOException $e) {
-    die("Database error: " . $e->getMessage() . "\n");
+    error_log("Install database error: " . $e->getMessage());
+    die("Database setup failed. Check the server error log.\n");
 }
 
 // Create uploads directory
@@ -67,15 +83,10 @@ $directories = [
 
 foreach ($directories as $dir) {
     if (!file_exists($dir)) {
-        mkdir($dir, 0777, true);
-        echo "✓ Created directory: $dir\n";
+        // Security: avoid world-writable upload directories.
+        mkdir($dir, 0755, true);
+        echo "[OK] Created directory: $dir\n";
     }
-}
-
-// Create .htaccess if not exists
-if (!file_exists('.htaccess')) {
-    copy('.htaccess.example', '.htaccess');
-    echo "✓ Created .htaccess file\n";
 }
 
 // Create config file for environment
@@ -99,7 +110,7 @@ if (APP_ENV === "development") {
 ?>';
 
 file_put_contents('config/env.php', $env_content);
-echo "✓ Created environment configuration\n";
+echo "[OK] Created environment configuration\n";
 
 echo "\n";
 echo "========================================\n";
@@ -108,15 +119,11 @@ echo "========================================\n";
 echo "\n";
 echo "Next steps:\n";
 echo "1. Configure your database in config/database.php\n";
-echo "2. Configure email settings in config/mail.php\n";
-echo "3. Set up Google Vision API credentials (for image search)\n";
+echo "2. Configure SMTP_USERNAME and SMTP_PASSWORD environment variables for email\n";
+echo "3. Configure IMAGGA_API_KEY / IMAGGA_API_SECRET if image tagging is needed\n";
 echo "4. Access the website: " . $_SERVER['HTTP_HOST'] . "/reclaim-system/\n";
 echo "\n";
-echo "Default Admin Login:\n";
-echo "Username: admin\n";
-echo "Password: admin123\n";
-echo "\n";
-echo "IMPORTANT: Change the admin password after first login!\n";
+echo "Default admin credentials are not printed for security.\n";
 echo "========================================\n";
 
 echo "</pre>";

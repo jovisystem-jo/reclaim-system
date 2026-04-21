@@ -11,14 +11,23 @@ class MailConfig {
     public static function init() {
         self::$mailer = new PHPMailer(true);
         
-        // Server settings (configure for your email provider)
+        // Enable debug for troubleshooting (remove after working)
+        // self::$mailer->SMTPDebug = 2;
+        
+        // Server settings
         self::$mailer->isSMTP();
-        self::$mailer->Host = 'smtp.gmail.com'; // Your SMTP server
+        self::$mailer->Host = 'smtp.gmail.com';
         self::$mailer->SMTPAuth = true;
-        self::$mailer->Username = 'your-email@gmail.com';
-        self::$mailer->Password = 'your-app-password';
+        
+        // Security: read SMTP credentials from environment variables, not source code.
+        self::$mailer->Username = getenv('SMTP_USERNAME') ?: '';
+        self::$mailer->Password = getenv('SMTP_PASSWORD') ?: '';
+        
         self::$mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         self::$mailer->Port = 587;
+        
+        // Set timeout to prevent hanging
+        self::$mailer->Timeout = 30;
         
         self::$mailer->setFrom('noreply@reclaim.com', 'Reclaim System');
         return self::$mailer;
@@ -27,6 +36,11 @@ class MailConfig {
     public static function sendNotification($to, $subject, $body) {
         try {
             $mail = self::init();
+            if (empty($mail->Username) || empty($mail->Password)) {
+                error_log("Email skipped: SMTP_USERNAME or SMTP_PASSWORD is not configured.");
+                return false;
+            }
+            $mail->clearAddresses();
             $mail->addAddress($to);
             $mail->Subject = $subject;
             $mail->isHTML(true);
@@ -35,7 +49,22 @@ class MailConfig {
             
             return $mail->send();
         } catch (Exception $e) {
-            error_log("Email failed: " . $mail->ErrorInfo);
+            error_log("Email failed to $to: " . ($mail->ErrorInfo ?? $e->getMessage()));
+            return false;
+        }
+    }
+    
+    // Test function to verify configuration
+    public static function testConnection() {
+        try {
+            $mail = self::init();
+            if (empty($mail->Username) || empty($mail->Password)) {
+                return false;
+            }
+            $mail->smtpConnect();
+            $mail->smtpClose();
+            return true;
+        } catch (Exception $e) {
             return false;
         }
     }

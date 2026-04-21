@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 
-session_start();
+secureSessionStart();
 if (!isset($_SESSION['userID'])) {
     http_response_code(401);
     echo json_encode(['error' => 'Unauthorized']);
@@ -14,7 +14,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
-$data = json_decode(file_get_contents('php://input'), true);
+$data = json_request_body();
+require_csrf_token($data);
+
 $notification_id = $data['notification_id'] ?? 0;
 
 if (!$notification_id) {

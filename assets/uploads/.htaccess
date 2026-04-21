@@ -1,0 +1,9 @@
+# Security: uploaded files must be served as files only, never executed as code.
+Options -Indexes
+
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar .cgi .pl .asp .aspx .jsp .sh
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phar .cgi .pl .asp .aspx .jsp .sh
+
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|php8|phar|cgi|pl|asp|aspx|jsp|sh)$">
+    Require all denied
+</FilesMatch>

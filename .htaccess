@@ -1,6 +1,10 @@
 RewriteEngine On
 RewriteBase /reclaim-system/
 
+# Security: never serve config files or secrets directly from the browser.
+RewriteRule ^config(/|$) - [F,L]
+RewriteRule ^(\.env|\.git|composer\.(json|lock)) - [F,L]
+
 # Allow all access to assets folder (no rewriting)
 RewriteRule ^assets/ - [L]
 

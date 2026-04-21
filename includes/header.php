@@ -1,6 +1,7 @@
 <?php
+require_once __DIR__ . '/security.php';
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    secureSessionStart();
 }
 
 // Use direct absolute path - no dynamic calculation
@@ -66,173 +67,55 @@ function getIconClassShort($type) {
 // Determine current path for active menu
 $current_page = basename($_SERVER['PHP_SELF']);
 $current_dir = basename(dirname($_SERVER['PHP_SELF']));
+$embedded_layout = defined('RECLAIM_EMBEDDED_LAYOUT') && RECLAIM_EMBEDDED_LAYOUT;
+$page_slug = preg_replace('/\.php$/', '', $current_page);
+$section_slug = ($current_dir === '.' || $current_dir === '\\') ? 'public' : $current_dir;
+$body_classes = implode(' ', [
+    'app-page',
+    'section-' . preg_replace('/[^a-z0-9\-]/i', '-', strtolower($section_slug)),
+    'page-' . preg_replace('/[^a-z0-9\-]/i', '-', strtolower($page_slug))
+]);
 ?>
+<?php if (!$embedded_layout): ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RECLAIM - Lost & Found</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
-    <style>
-        /* Notification Dropdown Styles */
-        .notification-dropdown {
-            width: 380px;
-            max-height: 500px;
-            overflow-y: auto;
-            padding: 0;
-        }
-        .notification-header {
-            background: linear-gradient(135deg, #FF8C00, #FF6B00);
-            color: white;
-            padding: 12px 15px;
-            position: sticky;
-            top: 0;
-            z-index: 1;
-        }
-        .notification-header h6 {
-            margin: 0;
-            font-weight: 600;
-        }
-        .notification-header small {
-            opacity: 0.9;
-            cursor: pointer;
-        }
-        .notification-header small:hover {
-            text-decoration: underline;
-        }
-        .notification-item {
-            padding: 12px 15px;
-            border-bottom: 1px solid #e0e0e0;
-            transition: background 0.2s;
-            cursor: pointer;
-        }
-        .notification-item:hover {
-            background: #f8f9fa;
-        }
-        .notification-item.unread {
-            background: #fff8f0;
-            border-left: 3px solid #FF8C00;
-        }
-        .notification-item.unread:hover {
-            background: #fff0e0;
-        }
-        .notification-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 12px;
-            flex-shrink: 0;
-        }
-        .notification-icon.info { background: #e3f2fd; color: #2196f3; }
-        .notification-icon.success { background: #e8f5e9; color: #4caf50; }
-        .notification-icon.warning { background: #fff3e0; color: #ff9800; }
-        .notification-icon.danger { background: #ffebee; color: #f44336; }
-        .notification-content {
-            flex: 1;
-            min-width: 0;
-        }
-        .notification-title {
-            font-weight: 600;
-            font-size: 14px;
-            margin-bottom: 3px;
-            color: #333;
-        }
-        .notification-message {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 3px;
-            word-wrap: break-word;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .notification-time {
-            font-size: 11px;
-            color: #999;
-        }
-        .notification-footer {
-            padding: 10px 15px;
-            text-align: center;
-            background: #f8f9fa;
-            position: sticky;
-            bottom: 0;
-            border-top: 1px solid #e0e0e0;
-        }
-        .notification-footer a {
-            color: #FF8C00;
-            text-decoration: none;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .notification-footer a:hover {
-            text-decoration: underline;
-        }
-        .no-notifications {
-            padding: 30px 20px;
-            text-align: center;
-            color: #999;
-        }
-        .no-notifications i {
-            font-size: 48px;
-            margin-bottom: 10px;
-            opacity: 0.5;
-        }
-        .notification-badge {
-            position: absolute;
-            top: -5px;
-            right: -8px;
-            background: #dc3545;
-            color: white;
-            border-radius: 50%;
-            padding: 2px 6px;
-            font-size: 10px;
-            font-weight: bold;
-            min-width: 18px;
-            text-align: center;
-        }
-        .nav-link.notification-link {
-            position: relative;
-        }
-        .dropdown-header-info {
-            font-size: 11px;
-            opacity: 0.8;
-            margin-top: 2px;
-        }
-    </style>
 </head>
-<body>
+<body class="<?= htmlspecialchars($body_classes) ?>">
+<?php endif; ?>
     <nav class="navbar navbar-expand-lg sticky-top">
         <div class="container">
             <a class="navbar-brand" href="<?= $base_url ?>">
                 <i class="fas fa-recycle"></i> RECLAIM
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <i class="fas fa-bars text-white"></i>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="<?= $base_url ?>">Home</a>
+                        <a class="nav-link <?= $current_page === 'index.php' ? 'active' : '' ?>" href="<?= $base_url ?>">Home</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="<?= $base_url ?>search.php">Search</a>
+                        <a class="nav-link <?= $current_page === 'search.php' ? 'active' : '' ?>" href="<?= $base_url ?>search.php">Search</a>
                     </li>
                     <?php if(isset($_SESSION['userID'])): ?>
                         <?php if($_SESSION['role'] == 'admin'): ?>
                             <li class="nav-item">
-                                <a class="nav-link" href="<?= $base_url ?>admin/dashboard.php">Admin Panel</a>
+                                <a class="nav-link <?= $current_dir === 'admin' ? 'active' : '' ?>" href="<?= $base_url ?>admin/dashboard.php">Admin Panel</a>
                             </li>
                         <?php else: ?>
                             <li class="nav-item">
-                                <a class="nav-link" href="<?= $base_url ?>user/dashboard.php">Dashboard</a>
+                                <a class="nav-link <?= $current_dir === 'user' ? 'active' : '' ?>" href="<?= $base_url ?>user/dashboard.php">Dashboard</a>
                             </li>
                         <?php endif; ?>
                         
@@ -296,7 +179,7 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
                         </li>
                         
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <a class="nav-link dropdown-toggle <?= $current_dir === 'user' ? 'active' : '' ?>" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="fas fa-user-circle"></i> <?= htmlspecialchars($_SESSION['name']) ?>
                             </a>
                             <ul class="dropdown-menu" aria-labelledby="userDropdown">
@@ -310,10 +193,10 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
                         </li>
                     <?php else: ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="<?= $base_url ?>login.php">Login</a>
+                            <a class="nav-link <?= $current_page === 'login.php' ? 'active' : '' ?>" href="<?= $base_url ?>login.php">Login</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="<?= $base_url ?>register.php">Register</a>
+                            <a class="nav-link <?= $current_page === 'register.php' ? 'active' : '' ?>" href="<?= $base_url ?>register.php">Register</a>
                         </li>
                     <?php endif; ?>
                 </ul>
@@ -323,6 +206,7 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
 
     <script>
     const baseUrl = '<?= $base_url ?>';
+    const csrfToken = '<?= csrf_token() ?>';
     
     // Function to mark notification as read and redirect
     function markAsReadAndRedirect(notificationId) {
@@ -330,8 +214,9 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken,
             },
-            body: JSON.stringify({ notification_id: notificationId })
+            body: JSON.stringify({ notification_id: notificationId, csrf_token: csrfToken })
         })
         .then(response => response.json())
         .then(data => {
@@ -346,7 +231,10 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
     // Function to mark all notifications as read
     function markAllAsRead() {
         fetch(baseUrl + 'api/mark-all-notifications-read.php', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'X-CSRF-Token': csrfToken
+            }
         })
         .then(response => response.json())
         .then(data => {
@@ -378,9 +266,44 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
             })
             .catch(error => console.error('Error updating notification count:', error));
     }
+
+    function syncHeaderLayoutSpacing() {
+        const body = document.body;
+        const header = document.querySelector('body > .navbar');
+
+        if (!body || !header) {
+            return;
+        }
+
+        const pageContainer = document.querySelector(
+            'body > .page-shell, body > .page-container, body > .content-wrapper, body > .container.content-wrapper'
+        );
+
+        if (pageContainer) {
+            pageContainer.classList.add('page-container');
+        }
+
+        const headerPosition = window.getComputedStyle(header).position;
+        const isFixedHeader = headerPosition === 'fixed';
+        const headerHeight = Math.ceil(header.getBoundingClientRect().height);
+
+        body.style.setProperty('--header-offset', `${headerHeight}px`);
+        body.classList.toggle('has-fixed-header', isFixedHeader);
+        body.classList.toggle('has-flow-header', !isFixedHeader);
+    }
     
     // Event listeners when DOM is loaded
     document.addEventListener('DOMContentLoaded', function() {
+        syncHeaderLayoutSpacing();
+
+        const header = document.querySelector('body > .navbar');
+        if (header && 'ResizeObserver' in window) {
+            const headerObserver = new ResizeObserver(syncHeaderLayoutSpacing);
+            headerObserver.observe(header);
+        }
+
+        window.addEventListener('resize', syncHeaderLayoutSpacing);
+
         // Mark all as read button
         const markAllBtn = document.getElementById('markAllReadBtn');
         if (markAllBtn) {

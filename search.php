@@ -129,14 +129,6 @@ if ($image_analysis_id > 0) {
 
 <!-- Additional styles specific to search page -->
 <style>
-    * {
-        font-family: 'Inter', sans-serif;
-    }
-    
-    body {
-        background: #f0f2f5;
-    }
-    
     .item-card {
         transition: transform 0.2s, box-shadow 0.2s;
     }
@@ -144,15 +136,20 @@ if ($image_analysis_id > 0) {
         transform: translateY(-3px);
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    .sticky-top {
-        position: sticky;
+    .search-layout {
+        row-gap: 24px;
+    }
+    .search-filters .card-body {
+        max-height: calc(100vh - 140px);
+        overflow-y: auto;
+    }
+    .search-filters .form-label {
+        font-size: 0.78rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
     }
     .image-search-banner {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 15px;
-        padding: 15px 20px;
         margin-bottom: 20px;
-        color: white;
     }
     .detected-labels {
         display: flex;
@@ -161,32 +158,20 @@ if ($image_analysis_id > 0) {
         margin-top: 10px;
     }
     .detected-label {
-        background: rgba(255,255,255,0.2);
         padding: 4px 12px;
-        border-radius: 50px;
-        font-size: 12px;
-    }
-    .card-header.bg-primary {
-        background: linear-gradient(135deg, #FF6B35, #E85D2C) !important;
-    }
-    .btn-primary {
-        background: linear-gradient(135deg, #FF6B35, #E85D2C);
-        border: none;
-    }
-    .btn-primary:hover {
-        background: linear-gradient(135deg, #E85D2C, #FF6B35);
     }
 </style>
 
-<div class="container mt-4">
-    <div class="row">
+<main class="page-shell page-shell--compact">
+<div class="container content-wrapper">
+    <div class="row search-layout">
         <!-- Filters Sidebar -->
-        <div class="col-md-3">
-            <div class="card sticky-top" style="top: 20px; z-index: 100;">
+        <div class="col-lg-4 col-xl-3">
+            <div class="card sticky-top search-filters" style="top: 20px; z-index: 100;">
                 <div class="card-header bg-primary text-white">
-                    <h5><i class="fas fa-filter"></i> Advanced Filters</h5>
+                    <h5 class="mb-0"><i class="fas fa-filter"></i> Advanced Filters</h5>
                 </div>
-                <div class="card-body" style="max-height: 80vh; overflow-y: auto;">
+                <div class="card-body">
                     <form method="GET" action="<?= $base_url ?>search.php">
                         <!-- Main Search -->
                         <div class="mb-3">
@@ -209,7 +194,7 @@ if ($image_analysis_id > 0) {
                         <!-- Category -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Category</label>
-                            <select name="category" class="form-control">
+                            <select name="category" class="form-select">
                                 <option value="">All Categories</option>
                                 <option value="Electronics" <?= $category == 'Electronics' ? 'selected' : '' ?>>📱 Electronics</option>
                                 <option value="Documents" <?= $category == 'Documents' ? 'selected' : '' ?>>📄 Documents</option>
@@ -227,7 +212,7 @@ if ($image_analysis_id > 0) {
                         <!-- Status -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Status</label>
-                            <select name="status" class="form-control">
+                            <select name="status" class="form-select">
                                 <option value="">All (Lost & Found)</option>
                                 <option value="lost" <?= $status == 'lost' ? 'selected' : '' ?>>❌ Lost</option>
                                 <option value="found" <?= $status == 'found' ? 'selected' : '' ?>>✅ Found</option>
@@ -294,7 +279,7 @@ if ($image_analysis_id > 0) {
         </div>
         
         <!-- Search Results -->
-        <div class="col-md-9">
+        <div class="col-lg-8 col-xl-9">
             <!-- Image Search Banner -->
             <?php if ($image_analysis_data): ?>
             <div class="image-search-banner">
@@ -426,12 +411,14 @@ if ($image_analysis_id > 0) {
         </div>
     </div>
 </div>
+</main>
 
 <script>
 document.getElementById('imageSearch').addEventListener('change', function(e) {
     if(e.target.files.length > 0) {
         const formData = new FormData();
         formData.append('image', e.target.files[0]);
+        formData.append('csrf_token', '<?= csrf_token() ?>'); // Security: protect upload endpoint from CSRF.
         
         const btn = document.querySelector('button[onclick*="imageSearch"]');
         const originalText = btn.innerHTML;

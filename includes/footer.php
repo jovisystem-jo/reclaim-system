@@ -1,39 +1,43 @@
-<footer class="footer mt-5">
+<?php $embedded_layout = defined('RECLAIM_EMBEDDED_LAYOUT') && RECLAIM_EMBEDDED_LAYOUT; ?>
+<footer class="footer">
     <div class="container">
-        <div class="row">
-            <div class="col-md-4">
-                <h5><i class="fas fa-recycle"></i> Reclaim System</h5>
-                <p>Helping you reconnect with your lost belongings since 2024.</p>
+        <div class="row align-items-start">
+            <div class="col-lg-4 col-md-6">
+                <h5><i class="fas fa-recycle me-2"></i>Reclaim System</h5>
+                <p class="mb-0">Helping you reconnect with your lost belongings since 2024.</p>
             </div>
-            <div class="col-md-4">
+            <div class="col-lg-4 col-md-6">
                 <h5>Quick Links</h5>
                 <ul class="list-unstyled">
-                    <li><a href="/reclaim-system/" class="text-white">Home</a></li>
-                    <li><a href="/reclaim-system/search.php" class="text-white">Search Items</a></li>
+                    <li><a href="/reclaim-system/">Home</a></li>
+                    <li><a href="/reclaim-system/search.php">Search Items</a></li>
                     <?php if(!isset($_SESSION['userID'])): ?>
-                        <li><a href="/reclaim-system/register.php" class="text-white">Register</a></li>
-                        <li><a href="/reclaim-system/login.php" class="text-white">Login</a></li>
+                        <li><a href="/reclaim-system/register.php">Register</a></li>
+                        <li><a href="/reclaim-system/login.php">Login</a></li>
                     <?php else: ?>
-                        <li><a href="/reclaim-system/logout.php" class="text-white">Logout</a></li>
+                        <li><a href="/reclaim-system/logout.php">Logout</a></li>
                     <?php endif; ?>
                 </ul>
             </div>
-            <div class="col-md-4">
+            <div class="col-lg-4">
                 <h5>Contact</h5>
                 <ul class="list-unstyled">
-                    <li><i class="fas fa-envelope"></i> support@reclaim.com</li>
-                    <li><i class="fas fa-phone"></i> +1 234 567 8900</li>
+                    <li><i class="fas fa-envelope me-2"></i>support@reclaim.com</li>
+                    <li><i class="fas fa-phone me-2"></i>+1 234 567 8900</li>
                 </ul>
             </div>
         </div>
-        <hr class="bg-light">
-        <div class="text-center">
-            <p>&copy; 2025 Reclaim System. All rights reserved.</p>
+        <hr>
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+            <p class="mb-0">&copy; <?= date('Y') ?> Reclaim System. All rights reserved.</p>
+            <p class="mb-0">Lost and found made easier.</p>
         </div>
     </div>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="/reclaim-system/assets/js/main.js"></script>
+<?php if (!$embedded_layout): ?>
 </body>
 </html>
+<?php endif; ?>

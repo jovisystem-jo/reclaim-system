@@ -17,7 +17,8 @@ $base_url = '/reclaim-system/';
 // Create uploads directory if not exists
 $uploadDir = __DIR__ . '/../assets/uploads/';
 if (!file_exists($uploadDir)) {
-    mkdir($uploadDir, 0777, true);
+    // Security: avoid world-writable upload directories.
+    mkdir($uploadDir, 0755, true);
 }
 
 // Delivery locations array
@@ -29,9 +30,68 @@ $delivery_locations = [
     'Other (Please specify)'
 ];
 
+// Category-specific brands
+$brands_by_category = [
+    'Electronics' => [
+        'Apple', 'Samsung', 'Sony', 'LG', 'Dell', 'HP', 'Lenovo', 'Asus', 'Acer', 'Microsoft',
+        'Panasonic', 'Toshiba', 'Philips', 'Bose', 'JBL', 'Beats', 'Xiaomi', 'OnePlus', 'Google', 'Nintendo', 'Other'
+    ],
+    'Documents' => [
+        'Passport', 'Driver License', 'Student ID', 'Work ID', 'Birth Certificate', 'Marriage Certificate',
+        'Diploma', 'Degree', 'Transcript', 'Visa', 'Insurance Card', 'Bank Card', 'Credit Card', 'Other'
+    ],
+    'Accessories' => [
+        'Apple', 'Samsung', 'Sony', 'Bose', 'JBL', 'Beats', 'Logitech', 'Razer', 'Corsair', 'SteelSeries',
+        'Fossil', 'Casio', 'Garmin', 'Fitbit', 'Xiaomi', 'Anker', 'Belkin', 'Spigen', 'OtterBox', 'Other'
+    ],
+    'Clothing' => [
+        'Nike', 'Adidas', 'Puma', 'Under Armour', 'H&M', 'Zara', 'Uniqlo', 'Levi\'s', 'Calvin Klein',
+        'Tommy Hilfiger', 'Lacoste', 'Ralph Lauren', 'Gucci', 'Louis Vuitton', 'Versace', 'Other'
+    ],
+    'Books' => [
+        'Oxford', 'Cambridge', 'Pearson', 'McGraw-Hill', 'Wiley', 'Penguin', 'HarperCollins', 'Simon & Schuster',
+        'Random House', 'Scholastic', 'Elsevier', 'Springer', 'Taylor & Francis', 'Other'
+    ],
+    'Wallet' => [
+        'Gucci', 'Louis Vuitton', 'Prada', 'Hermès', 'Coach', 'Michael Kors', 'Fossil', 'Calvin Klein',
+        'Tommy Hilfiger', 'Polo Ralph Lauren', 'Secrid', 'Bellroy', 'Other'
+    ],
+    'Keys' => [
+        'Toyota', 'Honda', 'BMW', 'Mercedes', 'Audi', 'Volkswagen', 'Ford', 'Hyundai', 'Kia', 'Mazda',
+        'Nissan', 'Subaru', 'Volvo', 'Lexus', 'Tesla', 'Yale', 'Schlage', 'Master Lock', 'Other'
+    ],
+    'Bag' => [
+        'Nike', 'Adidas', 'Puma', 'North Face', 'JanSport', 'Samsonite', 'Herschel', 'Fjällräven',
+        'Gucci', 'Louis Vuitton', 'Prada', 'Coach', 'Michael Kors', 'Tumi', 'Other'
+    ],
+    'Jewelry' => [
+        'Tiffany & Co.', 'Cartier', 'Pandora', 'Swarovski', 'David Yurman', 'Bvlgari', 'Van Cleef & Arpels',
+        'Chanel', 'Dior', 'Gucci', 'Rolex', 'Omega', 'Seiko', 'Citizen', 'Casio', 'Other'
+    ],
+    'Household' => [
+        'Other'
+    ],
+    'Others' => [
+        'Generic', 'No Brand', 'Custom Made', 'Handmade', 'Vintage', 'Limited Edition', 'Other'
+    ]
+];
+
+// Common colors
+$common_colors = [
+    'Black', 'White', 'Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Pink',
+    'Orange', 'Brown', 'Grey', 'Silver', 'Gold', 'Navy', 'Beige', 'Multicolor',
+    'Other'
+];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_token();
+
     $title = trim($_POST['title'] ?? '');
     $category = $_POST['category'] ?? '';
+    $brand = $_POST['brand'] ?? '';
+    $brand_other = trim($_POST['brand_other'] ?? '');
+    $color = $_POST['color'] ?? '';
+    $color_other = trim($_POST['color_other'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $location_found = trim($_POST['location'] ?? '');
     $date_occurred = $_POST['date_occurred'] ?? '';
@@ -40,53 +100,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $delivery_location_other = trim($_POST['delivery_location_other'] ?? '');
     $status = $_POST['status'] ?? 'lost';
     
+    // Process brand (handle "Other" option)
+    if ($brand === 'Other' && !empty($brand_other)) {
+        $brand = $brand_other;
+    }
+    
+    // Process color (handle "Other" option)
+    if ($color === 'Other' && !empty($color_other)) {
+        $color = $color_other;
+    }
+    
     // Process delivery location (where owner can collect)
     $delivery_location = '';
     if ($status === 'found') {
         if ($delivery_option === 'Other (Please specify)' && !empty($delivery_location_other)) {
-            // Use the text from the "Other" field
             $delivery_location = $delivery_location_other;
         } elseif (!empty($delivery_option) && $delivery_option !== 'Other (Please specify)') {
-            // Use the selected option
             $delivery_location = $delivery_option;
         }
     }
     
     // Handle image upload
     $image_url = '';
-    if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
-        $fileInfo = pathinfo($_FILES['image']['name']);
-        $extension = strtolower($fileInfo['extension']);
-        $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-        
-        if (in_array($extension, $allowedExtensions)) {
-            $fileName = uniqid() . '_' . time() . '.' . $extension;
-            $uploadFile = $uploadDir . $fileName;
-            
-            if (move_uploaded_file($_FILES['image']['tmp_name'], $uploadFile)) {
-                $image_url = 'assets/uploads/' . $fileName;
-            } else {
-                $error = 'Failed to move uploaded image. Check folder permissions.';
-            }
+    if (isset($_FILES['image']) && $_FILES['image']['error'] !== UPLOAD_ERR_NO_FILE) {
+        // Security: validate real MIME type, size, and use a random server filename.
+        $upload = secure_image_upload($_FILES['image'], $uploadDir, 'assets/uploads');
+        if ($upload['success']) {
+            $image_url = $upload['path'];
         } else {
-            $error = 'Invalid image format. Allowed: JPG, PNG, GIF, WEBP';
+            $error = $upload['message'];
         }
     }
     
     // Combine date and time
     $datetime_occurred = !empty($date_occurred) ? $date_occurred . (!empty($time_occurred) ? ' ' . $time_occurred : '') : null;
     
-    if (empty($title) || empty($category) || empty($description) || empty($location_found) || empty($date_occurred)) {
-        $error = 'Please fill in all required fields (Title, Category, Description, Location, and Date)';
+    // Validate required fields
+    if ($type === 'lost') {
+        // For lost items: location is required
+        if (empty($title) || empty($category) || empty($description) || empty($location_found) || empty($date_occurred)) {
+            $error = 'Please fill in all required fields (Title, Category, Description, Location, and Date)';
+        }
     } else {
+        // For found items: location is NOT required (removed)
+        if (empty($title) || empty($category) || empty($description) || empty($date_occurred)) {
+            $error = 'Please fill in all required fields (Title, Category, Description, and Date)';
+        }
+    }
+    
+    if (empty($error)) {
         try {
             // Insert into items table
             $stmt = $db->prepare("
-                INSERT INTO items (title, description, category, found_location, delivery_location, date_found, status, image_url, reported_by, user_id, reported_date) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                INSERT INTO items (title, description, category, brand, color, found_location, delivery_location, date_found, status, image_url, reported_by, user_id, reported_date) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ");
             
-            if ($stmt->execute([$title, $description, $category, $location_found, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
+            // For found items, location_found can be empty
+            $location_value = ($type === 'lost') ? $location_found : '';
+            
+            if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
                 $itemID = $db->lastInsertId();
                 
                 // Send notification to user
@@ -105,11 +178,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt = $db->prepare("INSERT INTO found_reports (itemID, reporterID, found_by) VALUES (?, ?, ?)");
                     $stmt->execute([$itemID, $_SESSION['userID'], $_SESSION['name']]);
                     $success = 'Found item reported successfully!';
-                    $success .= '<br><strong>📍 Found at:</strong> ' . htmlspecialchars($location_found);
-                    $success .= '<br><strong>🏢 Keep at:</strong> ' . htmlspecialchars($delivery_location);
                     if (!empty($image_url)) {
-                        $success .= '<br>📷 Image uploaded successfully.';
+                        $success .= ' Image uploaded successfully.';
                     }
+                    $success .= '<br><strong>🏢 Keep at:</strong> ' . htmlspecialchars($delivery_location);
                 }
                 
                 $_POST = [];
@@ -117,9 +189,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Failed to report item. Please try again.';
             }
         } catch (PDOException $e) {
-            $error = 'Database error: ' . $e->getMessage();
+            error_log("Report item database error: " . $e->getMessage());
+            $error = 'Unable to save item. Please try again.';
         }
     }
+}
+if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
+    define('RECLAIM_EMBEDDED_LAYOUT', true);
 }
 ?>
 <!DOCTYPE html>
@@ -265,12 +341,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .alert { border-radius: 12px; border: none; }
         .alert-success { background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%); color: #1e7e34; }
         .alert-danger { background: #ffebee; color: #c62828; }
+        .other-input {
+            margin-top: 8px;
+        }
+        .brand-select {
+            transition: all 0.3s;
+        }
     </style>
 </head>
-<body>
+<body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
     
-    <div class="container mt-4">
+    <main class="page-shell page-shell--compact">
+    <div class="container content-wrapper">
         <div class="row justify-content-center">
             <div class="col-md-8">
                 <div class="card fade-in">
@@ -289,6 +372,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endif; ?>
                         
                         <form method="POST" action="" enctype="multipart/form-data" id="reportForm">
+                            <?= csrf_field() ?>
                             <input type="hidden" name="status" value="<?= $type ?>">
                             
                             <div class="form-section">
@@ -304,7 +388,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <div class="row">
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label required-field">Category</label>
-                                        <select name="category" class="form-select" required>
+                                        <select name="category" id="category" class="form-select" required>
                                             <option value="">Select Category</option>
                                             <option value="Electronics" <?= (($_POST['category'] ?? '') == 'Electronics') ? 'selected' : '' ?>>📱 Electronics</option>
                                             <option value="Documents" <?= (($_POST['category'] ?? '') == 'Documents') ? 'selected' : '' ?>>📄 Documents</option>
@@ -315,21 +399,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <option value="Keys" <?= (($_POST['category'] ?? '') == 'Keys') ? 'selected' : '' ?>>🔑 Keys</option>
                                             <option value="Bag" <?= (($_POST['category'] ?? '') == 'Bag') ? 'selected' : '' ?>>🎒 Bag/Backpack</option>
                                             <option value="Jewelry" <?= (($_POST['category'] ?? '') == 'Jewelry') ? 'selected' : '' ?>>💍 Jewelry</option>
+                                            <option value="Household" <?= (($_POST['category'] ?? '') == 'Household') ? 'selected' : '' ?>>🏠 Household</option>
                                             <option value="Others" <?= (($_POST['category'] ?? '') == 'Others') ? 'selected' : '' ?>>📦 Others</option>
                                         </select>
                                     </div>
+                                    
+                                    <!-- Location Field - Only for Lost Items -->
+                                    <?php if ($type === 'lost'): ?>
                                     <div class="col-md-6 mb-3">
-                                        <label class="form-label required-field">Location Where <?= $type === 'lost' ? 'Lost' : 'Found' ?></label>
+                                        <label class="form-label required-field">Location Where Lost</label>
                                         <input type="text" name="location" class="form-control" required 
                                                placeholder="e.g., Library, G3, Cafeteria, etc." 
                                                value="<?= htmlspecialchars($_POST['location'] ?? '') ?>">
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Brand</label>
+                                        <select name="brand" id="brand" class="form-select brand-select">
+                                            <option value="">Select Brand (Optional)</option>
+                                        </select>
+                                        <div id="brand_other_div" class="other-input" style="display: none;">
+                                            <input type="text" name="brand_other" class="form-control" 
+                                                   placeholder="Please specify brand"
+                                                   value="<?= htmlspecialchars($_POST['brand_other'] ?? '') ?>">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Color</label>
+                                        <select name="color" id="color" class="form-select">
+                                            <option value="">Select Color (Optional)</option>
+                                            <?php foreach($common_colors as $c): ?>
+                                                <option value="<?= $c ?>" <?= (($_POST['color'] ?? '') == $c) ? 'selected' : '' ?>>
+                                                    <?= $c ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div id="color_other_div" class="other-input" style="display: none;">
+                                            <input type="text" name="color_other" class="form-control" 
+                                                   placeholder="Please specify color"
+                                                   value="<?= htmlspecialchars($_POST['color_other'] ?? '') ?>">
+                                        </div>
                                     </div>
                                 </div>
                                 
                                 <div class="mb-3">
                                     <label class="form-label required-field">Detailed Description</label>
                                     <textarea name="description" class="form-control" rows="4" required 
-                                              placeholder="Describe the item in detail - color, brand, unique markings, contents (if wallet/bag), etc."><?= htmlspecialchars($_POST['description'] ?? '') ?></textarea>
+                                              placeholder="Describe the item in detail - unique markings, features, contents, etc."><?= htmlspecialchars($_POST['description'] ?? '') ?></textarea>
                                 </div>
                             </div>
                             
@@ -414,6 +533,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
     
     <script>
+        // Category-brand mapping
+        const brandsByCategory = <?= json_encode($brands_by_category) ?>;
+        
+        // Update brand dropdown based on selected category
+        function updateBrands() {
+            const category = document.getElementById('category').value;
+            const brandSelect = document.getElementById('brand');
+            const brandOtherDiv = document.getElementById('brand_other_div');
+            
+            // Clear current options
+            brandSelect.innerHTML = '<option value="">Select Brand (Optional)</option>';
+            
+            if (category && brandsByCategory[category]) {
+                const brands = brandsByCategory[category];
+                brands.forEach(brand => {
+                    const option = document.createElement('option');
+                    option.value = brand;
+                    option.textContent = brand;
+                    brandSelect.appendChild(option);
+                });
+            }
+            
+            // Reset brand selection
+            brandSelect.value = '';
+            brandOtherDiv.style.display = 'none';
+            document.querySelector('input[name="brand_other"]').value = '';
+        }
+        
+        // Brand "Other" toggle
+        const brandSelect = document.getElementById('brand');
+        const brandOtherDiv = document.getElementById('brand_other_div');
+        
+        function toggleBrandOther() {
+            if (brandSelect.value === 'Other') {
+                brandOtherDiv.style.display = 'block';
+                document.querySelector('input[name="brand_other"]').required = true;
+            } else {
+                brandOtherDiv.style.display = 'none';
+                document.querySelector('input[name="brand_other"]').required = false;
+            }
+        }
+        
+        // Color "Other" toggle
+        const colorSelect = document.getElementById('color');
+        const colorOtherDiv = document.getElementById('color_other_div');
+        
+        function toggleColorOther() {
+            if (colorSelect.value === 'Other') {
+                colorOtherDiv.style.display = 'block';
+            } else {
+                colorOtherDiv.style.display = 'none';
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('category').addEventListener('change', function() {
+            updateBrands();
+        });
+        
+        brandSelect.addEventListener('change', toggleBrandOther);
+        colorSelect.addEventListener('change', toggleColorOther);
+        
+        // Initialize on page load
+        updateBrands();
+        toggleColorOther();
+        
+        // Image upload functionality
         const imageUploadContainer = document.getElementById('imageUploadContainer');
         const imageInput = document.getElementById('imageInput');
         const uploadedImagePreview = document.getElementById('uploadedImagePreview');
@@ -461,6 +647,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
     </script>
     
+    </main>
+
     <?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>
 </html>

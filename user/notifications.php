@@ -8,6 +8,7 @@ $userID = $_SESSION['userID'];
 
 // Handle mark as read
 if (isset($_GET['mark_read']) && is_numeric($_GET['mark_read'])) {
+    require_csrf_token();
     $stmt = $db->prepare("UPDATE notifications SET is_read = 1 WHERE notification_id = ? AND user_id = ?");
     $stmt->execute([$_GET['mark_read'], $userID]);
     header('Location: notifications.php');
@@ -16,6 +17,7 @@ if (isset($_GET['mark_read']) && is_numeric($_GET['mark_read'])) {
 
 // Handle mark all as read
 if (isset($_GET['mark_all'])) {
+    require_csrf_token();
     $stmt = $db->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?");
     $stmt->execute([$userID]);
     header('Location: notifications.php');
@@ -24,6 +26,7 @@ if (isset($_GET['mark_all'])) {
 
 // Handle delete notification
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
+    require_csrf_token();
     $stmt = $db->prepare("DELETE FROM notifications WHERE notification_id = ? AND user_id = ?");
     $stmt->execute([$_GET['delete'], $userID]);
     header('Location: notifications.php');
@@ -62,6 +65,9 @@ $stmt->execute($params);
 $notifications = $stmt->fetchAll();
 
 $base_url = '/reclaim-system/';
+if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
+    define('RECLAIM_EMBEDDED_LAYOUT', true);
+}
 ?>
 
 <!DOCTYPE html>
@@ -193,16 +199,17 @@ $base_url = '/reclaim-system/';
         }
     </style>
 </head>
-<body>
+<body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
     
-    <div class="container mt-4">
+    <main class="page-shell page-shell--compact">
+    <div class="container content-wrapper">
         <div class="card fade-in">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0"><i class="fas fa-bell me-2" style="color: #FF8C00;"></i> Notifications</h4>
                 <div>
                     <?php if($total_notifications > 0): ?>
-                    <a href="?mark_all=1" class="btn btn-sm btn-outline-primary me-2" onclick="return confirm('Mark all notifications as read?')">
+                    <a href="?mark_all=1&csrf_token=<?= urlencode(csrf_token()) ?>" class="btn btn-sm btn-outline-primary me-2" onclick="return confirm('Mark all notifications as read?')">
                         <i class="fas fa-check-double"></i> Mark all as read
                     </a>
                     <?php endif; ?>
@@ -255,11 +262,11 @@ $base_url = '/reclaim-system/';
                                         <p class="mb-2 text-muted mt-1 notification-message"><?= nl2br(htmlspecialchars($notification['message'])) ?></p>
                                         <div class="mt-2">
                                             <?php if($notification['is_read'] == 0): ?>
-                                                <a href="?mark_read=<?= $notification['notification_id'] ?>" class="mark-read-btn btn btn-sm btn-link text-decoration-none p-0 me-3">
+                                                <a href="?mark_read=<?= $notification['notification_id'] ?>&csrf_token=<?= urlencode(csrf_token()) ?>" class="mark-read-btn btn btn-sm btn-link text-decoration-none p-0 me-3">
                                                     <i class="fas fa-check-circle"></i> Mark as read
                                                 </a>
                                             <?php endif; ?>
-                                            <a href="?delete=<?= $notification['notification_id'] ?>" class="delete-notif btn btn-sm btn-link text-decoration-none p-0" onclick="return confirm('Delete this notification?')">
+                                            <a href="?delete=<?= $notification['notification_id'] ?>&csrf_token=<?= urlencode(csrf_token()) ?>" class="delete-notif btn btn-sm btn-link text-decoration-none p-0" onclick="return confirm('Delete this notification?')">
                                                 <i class="fas fa-trash-alt"></i> Delete
                                             </a>
                                         </div>
@@ -291,6 +298,7 @@ $base_url = '/reclaim-system/';
             </div>
         </div>
     </div>
+    </main>
     
     <?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>

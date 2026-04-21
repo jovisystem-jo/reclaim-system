@@ -18,6 +18,9 @@ $stmt->execute([$userID]);
 $claims = $stmt->fetchAll();
 
 $base_url = '/reclaim-system/';
+if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
+    define('RECLAIM_EMBEDDED_LAYOUT', true);
+}
 ?>
 
 <!DOCTYPE html>
@@ -30,10 +33,11 @@ $base_url = '/reclaim-system/';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
 </head>
-<body>
+<body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
     
-    <div class="container mt-4">
+    <main class="page-shell page-shell--compact">
+    <div class="container content-wrapper">
         <div class="card fade-in">
             <div class="card-header">
                 <h4><i class="fas fa-file-alt"></i> My Claim Requests</h4>
@@ -61,12 +65,10 @@ $base_url = '/reclaim-system/';
                             <tbody>
                                 <?php foreach($claims as $claim): ?>
                                 <tr>
-                                    <!-- FIXED: Use claim_id instead of claimID -->
                                     <td>#<?= $claim['claim_id'] ?></td>
                                     <td>
                                         <strong><?= htmlspecialchars($claim['item_description']) ?></strong>
-                                    </td
-                                    <!-- FIXED: Use created_at instead of claim_date -->
+                                    </td>
                                     <td><?= date('M d, Y', strtotime($claim['created_at'])) ?></td>
                                     <td>
                                         <?php
@@ -79,9 +81,8 @@ $base_url = '/reclaim-system/';
                                         <span class="badge bg-<?= $badgeClass ?>">
                                             <?= ucfirst($claim['status']) ?>
                                         </span>
-                                    </td
+                                    </td>
                                     <td>
-                                        <!-- FIXED: Use claim_id instead of claimID -->
                                         <button onclick="viewClaim(<?= $claim['claim_id'] ?>)" class="btn btn-sm btn-info">
                                             <i class="fas fa-eye"></i> View
                                         </button>
@@ -90,7 +91,7 @@ $base_url = '/reclaim-system/';
                                                 <i class="fas fa-handshake"></i> Complete Reclaim
                                             </button>
                                         <?php endif; ?>
-                                    </td
+                                    </td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -100,6 +101,7 @@ $base_url = '/reclaim-system/';
             </div>
         </div>
     </div>
+    </main>
     
     <script>
     function viewClaim(claimId) {

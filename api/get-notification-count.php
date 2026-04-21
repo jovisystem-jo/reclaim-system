@@ -1,7 +1,7 @@
 <?php
 require_once '../config/database.php';
 
-session_start();
+secureSessionStart();
 if (!isset($_SESSION['userID'])) {
     echo json_encode(['count' => 0]);
     exit();

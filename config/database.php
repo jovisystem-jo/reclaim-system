@@ -1,4 +1,11 @@
 <?php
+require_once __DIR__ . '/../includes/security.php';
+if (file_exists(__DIR__ . '/env.php')) {
+    require_once __DIR__ . '/env.php';
+}
+
+configureErrorHandling();
+
 // Database configuration
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
@@ -22,7 +29,9 @@ class Database {
                 ]
             );
         } catch(PDOException $e) {
-            die("Connection failed: " . $e->getMessage());
+            // Log the real error, but do not expose database details to users.
+            error_log("Database connection failed: " . $e->getMessage());
+            die("Database connection failed. Please try again later.");
         }
     }
     
@@ -40,6 +49,6 @@ class Database {
 
 // Start session if not started
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    secureSessionStart();
 }
 ?>

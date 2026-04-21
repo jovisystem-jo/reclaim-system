@@ -1,5 +1,4 @@
 <div class="col-md-2 p-0 sidebar">
-    <!-- Admin Profile Section -->
     <div class="admin-profile text-center pt-4 pb-3">
         <div class="profile-avatar mb-3">
             <i class="fas fa-user-shield"></i>
@@ -35,14 +34,12 @@
         </a>
         <a href="notifications.php" <?= basename($_SERVER['PHP_SELF']) == 'notifications.php' ? 'class="active"' : '' ?>>
             <i class="fas fa-bell"></i> Notifications
-        </a>
             <?php
-            // Get unread count for badge
-                require_once '../includes/notification.php';
-                $notifSystem = new NotificationSystem();
-                $unreadCount = $notifSystem->getUnreadCount($_SESSION['userID']);
-                    if ($unreadCount > 0): ?>
-                <span class="badge bg-danger float-end" style="font-size: 10px;"><?= $unreadCount ?></span>
+            require_once '../includes/notification.php';
+            $notifSystem = new NotificationSystem();
+            $unreadCount = $notifSystem->getUnreadCount($_SESSION['userID']);
+            if ($unreadCount > 0): ?>
+                <span class="badge bg-danger float-end"><?= $unreadCount ?></span>
             <?php endif; ?>
         </a>
         <a href="profile.php" <?= basename($_SERVER['PHP_SELF']) == 'profile.php' ? 'class="active"' : '' ?>>
@@ -54,128 +51,3 @@
         </a>
     </nav>
 </div>
-
-<style>
-.sidebar {
-    min-height: 100vh;
-    background: linear-gradient(135deg, #1A252F, #2C3E50);
-    color: white;
-    position: sticky;
-    top: 0;
-}
-
-/* Admin Profile Section */
-.admin-profile {
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-
-.profile-avatar {
-    width: 70px;
-    height: 70px;
-    background: rgba(255,107,53,0.2);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto;
-    transition: all 0.3s;
-    border: 2px solid rgba(255,107,53,0.5);
-}
-
-.profile-avatar i {
-    font-size: 32px;
-    color: #FF6B35;
-}
-
-.admin-profile h5 {
-    font-size: 1rem;
-    margin-bottom: 5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 0 10px;
-}
-
-.admin-profile small {
-    font-size: 0.7rem;
-    display: block;
-    opacity: 0.7;
-}
-
-.profile-info .admin-badge {
-    background: rgba(255,107,53,0.2);
-    color: #FF6B35;
-    font-size: 0.65rem;
-    padding: 5px 10px;
-    border-radius: 20px;
-    font-weight: normal;
-    display: inline-block;
-    max-width: 90%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.profile-info .admin-badge i {
-    font-size: 0.65rem;
-    margin-right: 3px;
-}
-
-.sidebar a {
-    color: rgba(255,255,255,0.8);
-    text-decoration: none;
-    display: block;
-    padding: 12px 20px;
-    transition: all 0.3s;
-    border-left: 3px solid transparent;
-    font-size: 14px;
-}
-
-.sidebar a:hover,
-.sidebar a.active {
-    background: rgba(255,255,255,0.1);
-    color: white;
-    border-left-color: #FF6B35;
-}
-
-.sidebar i {
-    margin-right: 10px;
-    width: 20px;
-}
-
-.sidebar hr {
-    margin: 10px 20px;
-}
-
-.main-content {
-    padding: 20px;
-    background: #f8f9fa;
-    min-height: 100vh;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .admin-profile h5 {
-        font-size: 0.85rem;
-    }
-    
-    .profile-info .admin-badge {
-        font-size: 0.55rem;
-        padding: 3px 8px;
-    }
-    
-    .profile-avatar {
-        width: 50px;
-        height: 50px;
-    }
-    
-    .profile-avatar i {
-        font-size: 24px;
-    }
-    
-    .sidebar a {
-        padding: 10px 15px;
-        font-size: 12px;
-    }
-}
-</style>

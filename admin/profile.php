@@ -40,6 +40,8 @@ $stmt->execute([$userID]);
 $verified_claims = $stmt->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_token();
+
     $name = trim($_POST['name'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $department = trim($_POST['department'] ?? '');
@@ -51,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Name is required';
     } else {
         try {
+            $password_updated = false;
             // Update basic info
             $stmt = $db->prepare("UPDATE users SET name = ?, phone = ?, department = ? WHERE user_id = ?");
             $stmt->execute([$name, $phone, $department, $userID]);
@@ -62,6 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $new_hash = password_hash($new_password, PASSWORD_DEFAULT);
                         $stmt = $db->prepare("UPDATE users SET password = ? WHERE user_id = ?");
                         $stmt->execute([$new_hash, $userID]);
+                        $password_updated = true;
                         $success = 'Profile updated successfully! Password changed.';
                     } else {
                         $error = 'New password must be at least 6 characters';
@@ -82,12 +86,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $admin = $stmt->fetch();
                 $_SESSION['name'] = $admin['name'];
                 
-                if (!$password_updated ?? false && empty($success)) {
+                if (!$password_updated && empty($success)) {
                     $success = 'Profile updated successfully!';
                 }
             }
         } catch (PDOException $e) {
-            $error = 'Database error: ' . $e->getMessage();
+            error_log("Admin profile database error: " . $e->getMessage());
+            $error = 'Unable to update profile. Please try again.';
         }
     }
 }
@@ -101,6 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
     <style>
         * {
             font-family: 'Inter', sans-serif;
@@ -335,12 +341,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     </style>
 </head>
-<body>
+<body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
             <?php include 'sidebar.php'; ?>
             
-            <div class="col-md-10 main-content">
+            <div class="col-md-10 main-content content-wrapper">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2 class="fw-bold"><i class="fas fa-user-shield me-2" style="color: #FF6B35;"></i> Admin Profile</h2>
                     <a href="dashboard.php" class="btn btn-secondary-custom">
@@ -422,6 +428,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             <div class="card-body">
                                 <form method="POST" action="" id="profileForm">
+                                    <?= csrf_field() ?>
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">Full Name</label>
                                         <input type="text" name="name" class="form-control" 

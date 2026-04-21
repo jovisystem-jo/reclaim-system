@@ -2,7 +2,7 @@
 require_once 'config/database.php';
 
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    secureSessionStart();
 }
 
 if (isset($_SESSION['userID'])) {
@@ -26,6 +26,8 @@ $departments = [
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_token();
+
     $name = $_POST['name'] ?? '';
     $email = $_POST['email'] ?? '';
     $username = $_POST['username'] ?? '';
@@ -34,7 +36,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $student_staff_id = $_POST['student_staff_id'] ?? '';
     $department = $_POST['department'] ?? '';
     $phone = $_POST['phone'] ?? '';
-    $role = $_POST['role'] ?? 'student'; // Default to student
+    $requested_role = $_POST['role'] ?? 'student';
+    // Security: never trust the hidden role field; users cannot self-register as admin.
+    $role = in_array($requested_role, ['student', 'staff'], true) ? $requested_role : 'student';
     
     // Validation
     if (empty($name) || empty($email) || empty($username) || empty($password)) {
@@ -87,6 +91,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register - Reclaim System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/style.css">
@@ -133,11 +140,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     </style>
 </head>
-<body class="bg-light">
-    <div class="container">
-        <div class="row justify-content-center mt-4">
-            <div class="col-md-8">
-                <div class="card fade-in">
+<body class="auth-page">
+    <main class="auth-shell">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-lg-8 col-md-10">
+                <div class="card fade-in auth-card">
                     <div class="card-header text-center">
                         <h3><i class="fas fa-user-plus"></i> Create Account</h3>
                         <p>Join Reclaim System today</p>
@@ -151,6 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endif; ?>
                         
                         <form method="POST" action="" id="registerForm">
+                            <?= csrf_field() ?>
                             <!-- Role Selection Section -->
                             <div class="mb-4">
                                 <label class="form-label required-field">I am a:</label>
@@ -242,7 +251,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             </div>
         </div>
-    </div>
+        </div>
+    </main>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>

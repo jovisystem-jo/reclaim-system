@@ -3,7 +3,7 @@ require_once 'config/database.php';
 require_once 'includes/notification.php';
 
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    secureSessionStart();
 }
 
 if (isset($_SESSION['userID'])) {
@@ -18,6 +18,8 @@ if (isset($_SESSION['userID'])) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_token();
+
     $email = $_POST['email'] ?? '';
     $password = $_POST['password'] ?? '';
     
@@ -31,6 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch();
             
             if ($user && password_verify($password, $user['password'])) {
+                // Security: prevent session fixation after a successful login.
+                session_regenerate_id(true);
                 $_SESSION['userID'] = $user['user_id'];
                 $_SESSION['name'] = $user['name'];
                 $_SESSION['email'] = $user['email'];
@@ -55,7 +59,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid email or password';
             }
         } catch (PDOException $e) {
-            $error = 'Database error: ' . $e->getMessage();
+            error_log("Login database error: " . $e->getMessage());
+            $error = 'Login failed. Please try again.';
         }
     }
 }
@@ -66,39 +71,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Reclaim System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
-        /* Home link styling */
-        .home-link {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #FF8C00;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.3s;
-            z-index: 10;
-        }
-        .home-link:hover {
-            color: #E85D2C;
-            transform: translateX(-3px);
-        }
-        .home-link i {
-            margin-right: 5px;
-        }
-        body {
-            position: relative;
+        .auth-card {
+            max-width: 560px;
+            margin: 0 auto;
         }
     </style>
 </head>
-<body class="bg-light">
-     
-    <div class="container">
-        <div class="row justify-content-center mt-5">
-            <div class="col-md-5">
-                <div class="card fade-in">
+<body class="auth-page">
+    <main class="auth-shell">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-lg-5 col-md-7">
+                <div class="card fade-in auth-card">
                     <div class="card-header text-center">
                         <h3><i class="fas fa-recycle"></i> Reclaim System</h3>
                         <p class="mb-0">Login to your account</p>
@@ -109,6 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endif; ?>
                         
                         <form method="POST" action="">
+                            <?= csrf_field() ?>
                             <div class="mb-3">
                                 <label for="email" class="form-label">Email Address</label>
                                 <div class="input-group">
@@ -140,7 +132,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             </div>
         </div>
-    </div>
+        </div>
+    </main>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>

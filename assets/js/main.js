@@ -102,6 +102,11 @@ function submitFormAjax(formId, url, callback) {
     if (!form) return;
     
     const formData = new FormData(form);
+    const csrfInput = form.querySelector('input[name="csrf_token"]');
+    if (csrfInput && !formData.has('csrf_token')) {
+        // Security: include CSRF token for AJAX form submissions.
+        formData.append('csrf_token', csrfInput.value);
+    }
     
     fetch(url, {
         method: 'POST',

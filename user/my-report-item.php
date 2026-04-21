@@ -7,32 +7,10 @@ require_once __DIR__ . '/../includes/functions.php';
 $db = Database::getInstance()->getConnection();
 $userID = $_SESSION['userID'];
 
-// Handle Delete Request
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $item_id = $_GET['delete'];
-    
-    // Verify item belongs to user
-    $stmt = $db->prepare("SELECT item_id FROM items WHERE item_id = ? AND reported_by = ?");
-    $stmt->execute([$item_id, $userID]);
-    
-    if ($stmt->fetch()) {
-        // Delete the item
-        $stmt = $db->prepare("DELETE FROM items WHERE item_id = ?");
-        if ($stmt->execute([$item_id])) {
-            $_SESSION['success_message'] = "Item deleted successfully!";
-        } else {
-            $_SESSION['error_message'] = "Failed to delete item.";
-        }
-    } else {
-        $_SESSION['error_message'] = "You don't have permission to delete this item.";
-    }
-    
-    header('Location: ' . $_SERVER['PHP_SELF']);
-    exit();
-}
-
 // Handle Update Request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_item'])) {
+    require_csrf_token();
+
     $item_id = $_POST['item_id'];
     $title = trim($_POST['title'] ?? '');
     $category = $_POST['category'] ?? '';
@@ -50,28 +28,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_item'])) {
         // Handle image upload if new image is provided
         $image_url = $item['image_url'];
         
-        if (isset($_FILES['edit_image']) && $_FILES['edit_image']['error'] === UPLOAD_ERR_OK) {
+        if (isset($_FILES['edit_image']) && $_FILES['edit_image']['error'] !== UPLOAD_ERR_NO_FILE) {
             $uploadDir = __DIR__ . '/../assets/uploads/';
-            if (!file_exists($uploadDir)) {
-                mkdir($uploadDir, 0777, true);
-            }
-            
-            $fileInfo = pathinfo($_FILES['edit_image']['name']);
-            $extension = strtolower($fileInfo['extension']);
-            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            
-            if (in_array($extension, $allowedExtensions)) {
-                // Delete old image if exists
-                if (!empty($item['image_url']) && file_exists(__DIR__ . '/../' . $item['image_url'])) {
-                    unlink(__DIR__ . '/../' . $item['image_url']);
-                }
-                
-                $fileName = uniqid() . '_' . time() . '.' . $extension;
-                $uploadFile = $uploadDir . $fileName;
-                
-                if (move_uploaded_file($_FILES['edit_image']['tmp_name'], $uploadFile)) {
-                    $image_url = 'assets/uploads/' . $fileName;
-                }
+            // Security: validate image content and store with a random filename.
+            $upload = secure_image_upload($_FILES['edit_image'], $uploadDir, 'assets/uploads');
+            if ($upload['success'] && !empty($upload['path'])) {
+                delete_uploaded_file_safely($item['image_url'], __DIR__ . '/../assets/uploads/');
+                $image_url = $upload['path'];
+            } elseif (!$upload['success']) {
+                $_SESSION['error_message'] = $upload['message'];
+                header('Location: ' . $_SERVER['PHP_SELF']);
+                exit();
             }
         }
         
@@ -165,6 +132,9 @@ $base_url = '/reclaim-system/';
 $success_message = $_SESSION['success_message'] ?? '';
 $error_message = $_SESSION['error_message'] ?? '';
 unset($_SESSION['success_message'], $_SESSION['error_message']);
+if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
+    define('RECLAIM_EMBEDDED_LAYOUT', true);
+}
 ?>
 
 <!DOCTYPE html>
@@ -232,10 +202,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         }
     </style>
 </head>
-<body>
+<body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
     
-    <div class="container mt-4">
+    <main class="page-shell page-shell--compact">
+    <div class="container content-wrapper">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-clipboard-list"></i> My Reported Items</h2>
             <a href="<?= $base_url ?>user/report-item.php" class="btn btn-primary">
@@ -375,9 +346,6 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <button onclick="openEditModal(<?= htmlspecialchars(json_encode($item)) ?>)" class="btn btn-sm btn-warning">
                                     <i class="fas fa-edit"></i> Edit
                                 </button>
-                                <button onclick="confirmDelete(<?= $item['item_id'] ?>)" class="btn btn-sm btn-danger">
-                                    <i class="fas fa-trash"></i> Delete
-                                </button>
                                 <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-outline-primary">
                                     <i class="fas fa-eye"></i> View
                                 </a>
@@ -399,6 +367,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <form method="POST" enctype="multipart/form-data">
+                    <?= csrf_field() ?>
                     <input type="hidden" name="update_item" value="1">
                     <input type="hidden" name="item_id" id="edit_item_id">
                     <div class="modal-body">
@@ -464,26 +433,6 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         </div>
     </div>
 
-    <!-- Delete Confirmation Modal -->
-    <div class="modal fade" id="deleteModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title"><i class="fas fa-trash me-2"></i> Confirm Delete</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p>Are you sure you want to delete this item?</p>
-                    <p class="text-danger"><strong>Warning:</strong> This action cannot be undone. All claims associated with this item will also be deleted.</p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <a href="#" id="confirmDeleteBtn" class="btn btn-danger">Yes, Delete Item</a>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
         function openEditModal(item) {
             document.getElementById('edit_item_id').value = item.item_id;
@@ -524,11 +473,6 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             }
         });
         
-        function confirmDelete(itemId) {
-            document.getElementById('confirmDeleteBtn').href = '?delete=' + itemId;
-            new bootstrap.Modal(document.getElementById('deleteModal')).show();
-        }
-        
         function markAsResolved(itemId) {
             if(confirm('Mark this item as resolved? This will update the status to returned.')) {
                 fetch('<?= $base_url ?>api/mark-resolved.php', {
@@ -547,6 +491,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             }
         }
     </script>
+
+    </main>
 
     <?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>

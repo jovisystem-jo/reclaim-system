@@ -1,8 +1,6 @@
 <?php
-session_start();
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once 'includes/security.php';
+secureSessionStart();
 
 // Check for account deletion message
 $account_deleted_message = '';
@@ -414,7 +412,7 @@ $base_url = '/reclaim-system/';
     </div>
 <?php endif; ?>
 
-<div class="container mt-4">
+<div class="container content-wrapper">
     <div class="hero-section text-white fade-in-up">
         <div class="row align-items-center">
             <div class="col-lg-7">
@@ -701,6 +699,7 @@ document.getElementById('imageUpload').addEventListener('change', function(e) {
     if(e.target.files.length > 0) {
         const formData = new FormData();
         formData.append('image', e.target.files[0]);
+        formData.append('csrf_token', '<?= csrf_token() ?>'); // Security: protect upload endpoint from CSRF.
         
         const btn = document.querySelector('.search-box-modern button');
         const originalText = btn.innerHTML;

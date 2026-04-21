@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 
-session_start();
+secureSessionStart();
 if (!isset($_SESSION['userID'])) {
     echo json_encode([]);
     exit();

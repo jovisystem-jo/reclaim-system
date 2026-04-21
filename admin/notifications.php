@@ -11,6 +11,8 @@ $error = '';
 
 // Handle sending bulk notification
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    require_csrf_token();
+
     $action = $_POST['action'];
     
     if ($action === 'send_bulk') {
@@ -119,6 +121,7 @@ $base_url = '/reclaim-system/';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
     <style>
         * {
             font-family: 'Inter', sans-serif;
@@ -294,12 +297,12 @@ $base_url = '/reclaim-system/';
         }
     </style>
 </head>
-<body>
+<body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
             <?php include 'sidebar.php'; ?>
             
-            <div class="col-md-10 main-content">
+            <div class="col-md-10 main-content content-wrapper">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2 class="fw-bold"><i class="fas fa-bell me-2" style="color: #FF6B35;"></i> Notifications</h2>
                     <a href="dashboard.php" class="btn btn-secondary-custom">
@@ -355,6 +358,7 @@ $base_url = '/reclaim-system/';
                             </div>
                             <div class="card-body">
                                 <form method="POST" action="">
+                                    <?= csrf_field() ?>
                                     <input type="hidden" name="action" value="send_bulk">
                                     
                                     <div class="mb-3">
@@ -444,6 +448,7 @@ $base_url = '/reclaim-system/';
                                     <span><i class="fas fa-list me-2" style="color: #FF6B35;"></i> Your Notifications</span>
                                     <div>
                                         <form method="POST" action="" style="display: inline;">
+                                            <?= csrf_field() ?>
                                             <input type="hidden" name="action" value="mark_all_read">
                                             <button type="submit" class="btn btn-sm btn-outline-secondary">
                                                 <i class="fas fa-check-double me-1"></i> Mark All Read
@@ -489,6 +494,7 @@ $base_url = '/reclaim-system/';
                                                     <div class="mt-2">
                                                         <?php if($notif['is_read'] == 0): ?>
                                                             <form method="POST" action="" style="display: inline;">
+                                                                <?= csrf_field() ?>
                                                                 <input type="hidden" name="action" value="mark_read">
                                                                 <input type="hidden" name="notification_id" value="<?= $notif['notification_id'] ?>">
                                                                 <button type="submit" class="btn btn-sm btn-link text-decoration-none p-0 me-3">
@@ -497,6 +503,7 @@ $base_url = '/reclaim-system/';
                                                             </form>
                                                         <?php endif; ?>
                                                         <form method="POST" action="" style="display: inline;">
+                                                            <?= csrf_field() ?>
                                                             <input type="hidden" name="action" value="delete">
                                                             <input type="hidden" name="notification_id" value="<?= $notif['notification_id'] ?>">
                                                             <button type="submit" class="btn btn-sm btn-link text-danger text-decoration-none p-0" onclick="return confirm('Delete this notification?')">

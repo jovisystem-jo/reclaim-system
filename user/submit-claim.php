@@ -11,6 +11,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
+$postData = $_POST;
+require_csrf_token($postData);
+
 $item_id = $_POST['item_id'] ?? 0;
 $claimant_description = $_POST['claimant_description'] ?? '';
 
@@ -29,16 +32,15 @@ if ($stmt->fetchColumn() > 0) {
 
 // Handle proof image upload
 $proof_image_url = '';
-if (isset($_FILES['proof_image']) && $_FILES['proof_image']['error'] === UPLOAD_ERR_OK) {
+if (isset($_FILES['proof_image']) && $_FILES['proof_image']['error'] !== UPLOAD_ERR_NO_FILE) {
     $uploadDir = __DIR__ . '/../assets/uploads/proofs/';
-    if (!file_exists($uploadDir)) {
-        mkdir($uploadDir, 0777, true);
+    // Security: proof images are validated by MIME type and saved with random names.
+    $upload = secure_image_upload($_FILES['proof_image'], $uploadDir, 'assets/uploads/proofs');
+    if (!$upload['success']) {
+        header('Location: ' . '/reclaim-system/item-details.php?id=' . $item_id . '&error=invalid_upload');
+        exit();
     }
-    $fileName = uniqid() . '_' . basename($_FILES['proof_image']['name']);
-    $uploadFile = $uploadDir . $fileName;
-    if (move_uploaded_file($_FILES['proof_image']['tmp_name'], $uploadFile)) {
-        $proof_image_url = 'assets/uploads/proofs/' . $fileName;
-    }
+    $proof_image_url = $upload['path'];
 }
 
 // Insert claim request

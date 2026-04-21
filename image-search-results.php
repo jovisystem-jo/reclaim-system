@@ -51,7 +51,7 @@ $results = $stmt->fetchAll();
 $base_url = '/reclaim-system/';
 ?>
 
-<div class="container mt-4">
+<div class="container content-wrapper">
     <div class="card fade-in">
         <div class="card-header bg-primary text-white">
             <h5><i class="fas fa-search"></i> Image Search Results</h5>

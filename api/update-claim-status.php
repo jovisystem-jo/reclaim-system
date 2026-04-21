@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once __DIR__ . '/../config/database.php';
+secureSessionStart();
 
 header('Content-Type: application/json');
 
@@ -9,7 +9,9 @@ if (!isset($_SESSION['userID'])) {
     exit();
 }
 
-$data = json_decode(file_get_contents('php://input'), true);
+$data = json_request_body();
+require_csrf_token($data);
+
 $claim_id = $data['claim_id'] ?? 0;
 $status = $data['status'] ?? '';
 
@@ -48,6 +50,7 @@ try {
     echo json_encode(['success' => true]);
     
 } catch (PDOException $e) {
-    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    error_log("Claim status update failed: " . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Unable to update claim status']);
 }
 ?>

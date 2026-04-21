@@ -1,0 +1,11 @@
+# Local secrets and environment-specific config
+.env
+config/*.json
+config/env.php
+
+# Installed dependencies
+vendor/
+
+# User-uploaded files
+assets/uploads/*
+!assets/uploads/.htaccess

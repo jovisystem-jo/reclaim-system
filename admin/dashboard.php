@@ -58,6 +58,7 @@ $base_url = '/reclaim-system/';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
     <style>
         * {
             font-family: 'Inter', sans-serif;
@@ -193,13 +194,13 @@ $base_url = '/reclaim-system/';
         .status-rejected { background: #dc3545; color: white; }
     </style>
 </head>
-<body>
+<body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
             <?php include 'sidebar.php'; ?>
             
             <!-- Main Content -->
-            <div class="col-md-10 main-content">
+            <div class="col-md-10 main-content content-wrapper">
                 <!-- Welcome Banner -->
                 <div class="welcome-banner">
                     <div class="d-flex justify-content-between align-items-center">

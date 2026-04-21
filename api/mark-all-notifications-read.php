@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 
-session_start();
+secureSessionStart();
 if (!isset($_SESSION['userID'])) {
     http_response_code(401);
     echo json_encode(['error' => 'Unauthorized']);
@@ -13,6 +13,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['error' => 'Method not allowed']);
     exit();
 }
+
+require_csrf_token();
 
 $db = Database::getInstance()->getConnection();
 

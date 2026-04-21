@@ -18,13 +18,16 @@ $categories_list = [
     'Keys' => '🔑 Keys',
     'Bag' => '🎒 Bag/Backpack',
     'Jewelry' => '💍 Jewelry',
+    'Household' => '🏠 Household',
     'Others' => '📦 Others'
 ];
 
 // Handle item actions (delete, update status, update category)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf_token();
+
     $action = $_POST['action'] ?? '';
-    $item_id = $_POST['item_id'] ?? 0;
+    $item_id = (int) ($_POST['item_id'] ?? 0);
     
     if ($action === 'delete') {
         // Delete item
@@ -122,6 +125,7 @@ $base_url = '/reclaim-system/';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
     <style>
         * {
             font-family: 'Inter', sans-serif;
@@ -310,12 +314,12 @@ $base_url = '/reclaim-system/';
         .cat-others { background: #eceff1; color: #546e7a; }
     </style>
 </head>
-<body>
+<body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
             <?php include 'sidebar.php'; ?>
             
-            <div class="col-md-10 main-content">
+            <div class="col-md-10 main-content content-wrapper">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2 class="fw-bold"><i class="fas fa-boxes me-2" style="color: #FF6B35;"></i> Manage Items</h2>
                     <a href="dashboard.php" class="btn btn-secondary-custom">
@@ -488,6 +492,7 @@ $base_url = '/reclaim-system/';
                                                         <li><hr class="dropdown-divider"></li>
                                                         <li>
                                                             <form method="POST" style="display: inline;">
+                                                                <?= csrf_field() ?>
                                                                 <input type="hidden" name="item_id" value="<?= $item['item_id'] ?>">
                                                                 <input type="hidden" name="action" value="update_category">
                                                                 <select name="category" class="dropdown-item" onchange="this.form.submit()" style="background: none; border: none; width: 100%;">
@@ -503,6 +508,7 @@ $base_url = '/reclaim-system/';
                                                         <li><hr class="dropdown-divider"></li>
                                                         <li>
                                                             <form method="POST" style="display: inline;">
+                                                                <?= csrf_field() ?>
                                                                 <input type="hidden" name="item_id" value="<?= $item['item_id'] ?>">
                                                                 <input type="hidden" name="action" value="update_status">
                                                                 <select name="status" class="dropdown-item" onchange="this.form.submit()" style="background: none; border: none; width: 100%;">
@@ -517,6 +523,7 @@ $base_url = '/reclaim-system/';
                                                         <li><hr class="dropdown-divider"></li>
                                                         <li>
                                                             <form method="POST" style="display: inline;" onsubmit="return confirm('Delete this item permanently? This action cannot be undone.')">
+                                                                <?= csrf_field() ?>
                                                                 <input type="hidden" name="item_id" value="<?= $item['item_id'] ?>">
                                                                 <input type="hidden" name="action" value="delete">
                                                                 <button type="submit" class="dropdown-item text-danger">

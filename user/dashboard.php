@@ -32,6 +32,9 @@ $stmt->execute([$userID]);
 $recent_items = $stmt->fetchAll();
 
 $base_url = '/reclaim-system/';
+if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
+    define('RECLAIM_EMBEDDED_LAYOUT', true);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -108,10 +111,11 @@ $base_url = '/reclaim-system/';
         }
     </style>
 </head>
-<body>
+<body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
     
-    <div class="container mt-4">
+    <main class="page-shell page-shell--compact">
+    <div class="container content-wrapper">
         <!-- Welcome Banner -->
         <div class="alert alert-success fade-in" style="background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%); border: none;">
             <h4 class="mb-2"><i class="fas fa-smile-wink"></i> Welcome back, <?= htmlspecialchars($_SESSION['name']) ?>!</h4>
@@ -278,6 +282,7 @@ $base_url = '/reclaim-system/';
             </div>
         </div>
     </div>
+    </main>
     
     <?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>

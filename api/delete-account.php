@@ -4,12 +4,26 @@ require_once __DIR__ . '/../includes/auth.php';
 
 // Start session if not started
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    secureSessionStart();
 }
 
 // Check if user is logged in
 if (!isset($_SESSION['userID'])) {
     header('Location: /reclaim-system/login.php');
+    exit();
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    header('Location: /reclaim-system/user/user-profile.php');
+    exit();
+}
+
+require_csrf_token();
+
+if (($_POST['confirm_delete'] ?? '') !== 'DELETE') {
+    $_SESSION['delete_error'] = 'Account deletion was not confirmed.';
+    header('Location: /reclaim-system/user/user-profile.php');
     exit();
 }
 
@@ -72,9 +86,12 @@ try {
     }
     
     session_destroy();
+    session_write_close();
+    session_id('');
     
     // Set success message in session for display on index page
-    session_start();
+    secureSessionStart();
+    session_regenerate_id(true);
     $_SESSION['account_deleted'] = 'Your account has been successfully deleted. We are sorry to see you go!';
     
     // Redirect to index page
