@@ -158,6 +158,11 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             transition: transform 0.3s;
             margin-bottom: 20px;
         }
+
+        .content-wrapper {
+            margin-top: 20px; /* adjust: 20px–40px */
+        }
+        
         .stats-card:hover { transform: translateY(-3px); }
         .stats-card i { font-size: 36px; margin-bottom: 10px; }
         .stats-card h3 { font-size: 28px; margin: 10px 0; color: #333; }
@@ -167,26 +172,6 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             padding: 15px;
             border-radius: 10px;
             margin-bottom: 20px;
-        }
-        .item-card { transition: transform 0.2s; margin-bottom: 20px; }
-        .item-card:hover { transform: translateY(-5px); }
-        .badge-lost { background-color: #dc3545; }
-        .badge-found { background-color: #28a745; }
-        .badge-returned { background-color: #17a2b8; }
-        .status-badge {
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        .action-buttons {
-            display: flex;
-            gap: 5px;
-            justify-content: flex-end;
-        }
-        .action-buttons .btn-sm {
-            padding: 4px 8px;
-            font-size: 12px;
         }
         .modal-header {
             background: linear-gradient(135deg, #FF6B35, #E85D2C);
@@ -199,6 +184,99 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             max-width: 150px;
             margin-top: 10px;
             border-radius: 10px;
+        }
+        
+        /* Item Card Styles - Matching index.php */
+        .item-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .item-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .item-card-image {
+            height: 180px;
+            width: 100%;
+            object-fit: cover;
+        }
+        .item-card-placeholder {
+            height: 180px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa;
+        }
+        .item-card .card-body {
+            padding: 15px;
+        }
+        /* Fix for badge alignment */
+        .item-card .d-flex {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-start !important;
+            width: 100%;
+        }
+        .item-card .card-title {
+            flex: 1;
+            word-break: break-word;
+            padding-right: 10px;
+            margin-bottom: 0;
+            font-size: 0.9rem;
+            font-weight: 600;
+            line-height: 1.4;
+        }
+        .status-badge {
+            flex-shrink: 0;
+            white-space: nowrap;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+        }
+        .badge-lost { background-color: #dc3545; }
+        .badge-found { background-color: #28a745; }
+        .badge-returned { background-color: #17a2b8; }
+        .item-meta {
+            margin-top: 10px;
+        }
+        .item-meta-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .item-meta-row i {
+            width: 18px;
+            font-size: 11px;
+            color: #FF8C00;
+        }
+        .item-meta-row span {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .card-footer {
+            background-color: transparent;
+            border-top: 1px solid #e9ecef;
+            padding: 12px 15px;
+        }
+        .card-footer .btn {
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .action-buttons .btn-sm {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+        .alert-sm {
+            padding: 5px 10px;
+            font-size: 11px;
         }
     </style>
 </head>
@@ -252,7 +330,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             </div>
             <div class="col-md-3">
                 <div class="stats-card">
-                    <i class="fas fa-check-circle" style="color: #17a2b8;"></i>
+                    <i class="fas fa-check-circle" style="color: #28a745;"></i>
                     <h3><?= $stats['returned_count'] ?? 0 ?></h3>
                     <p>Returned Items</p>
                 </div>
@@ -304,50 +382,59 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                 </div>
             </div>
         <?php else: ?>
-            <div class="row">
+            <div class="row g-4">
                 <?php foreach($reported_items as $item): ?>
-                <div class="col-md-6 col-lg-4">
+                <div class="col-md-6 col-xl-4">
                     <div class="card item-card h-100">
                         <?php 
                         $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
                         $imageUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
                         ?>
                         <?php if($hasImage): ?>
-                            <img src="<?= $imageUrl ?>" class="card-img-top" alt="Item image" style="height: 180px; object-fit: cover;">
+                            <img src="<?= $imageUrl ?>" class="item-card-image" alt="Item image">
                         <?php else: ?>
-                            <div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height: 180px;">
+                            <div class="item-card-placeholder">
                                 <i class="fas fa-box-open fa-4x" style="color: #FF8C00;"></i>
                             </div>
                         <?php endif; ?>
                         
                         <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
-                                <h6 class="card-title mb-0"><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 60)) ?>...</h6>
-                                <span class="status-badge badge-<?= $item['status'] ?>">
-                                    <?= ucfirst($item['status']) ?>
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h6 class="card-title"><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 60)) ?>...</h6>
+                                <span class="status-badge <?= ($item['status'] ?? 'found') == 'lost' ? 'badge-lost' : (($item['status'] ?? 'found') == 'returned' ? 'badge-returned' : 'badge-found') ?>">
+                                    <?= ucfirst($item['status'] ?? 'found') ?>
                                 </span>
                             </div>
                             
-                            <p class="card-text small text-muted mb-2">
-                                <i class="fas fa-map-marker-alt"></i> <?= htmlspecialchars($item['found_location'] ?? $item['location']) ?><br>
-                                <i class="fas fa-tag"></i> <?= htmlspecialchars($item['category']) ?><br>
-                                <i class="fas fa-calendar"></i> <?= date('M d, Y', strtotime($item['reported_date'])) ?>
-                            </p>
+                            <div class="item-meta">
+                                <div class="item-meta-row">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                    <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?></span>
+                                </div>
+                                <div class="item-meta-row">
+                                    <i class="fas fa-tag"></i>
+                                    <span><?= htmlspecialchars($item['category'] ?? 'N/A') ?></span>
+                                </div>
+                                <div class="item-meta-row">
+                                    <i class="fas fa-calendar"></i>
+                                    <span><?= date('M d, Y', strtotime($item['reported_date'])) ?></span>
+                                </div>
+                            </div>
                             
                             <?php if($item['claim_count'] > 0): ?>
-                                <div class="alert alert-info alert-sm py-1 mb-2">
+                                <div class="alert alert-info alert-sm py-1 mb-2 mt-2">
                                     <small><i class="fas fa-hand-paper"></i> <?= $item['claim_count'] ?> claim(s) received</small>
                                 </div>
                             <?php endif; ?>
                         </div>
                         
-                        <div class="card-footer bg-transparent">
+                        <div class="card-footer">
                             <div class="action-buttons">
                                 <button onclick="openEditModal(<?= htmlspecialchars(json_encode($item)) ?>)" class="btn btn-sm btn-warning">
                                     <i class="fas fa-edit"></i> Edit
                                 </button>
                                 <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-outline-primary">
-                                    <i class="fas fa-eye"></i> View
+                                    <i class="fas fa-eye"></i> View Details
                                 </a>
                             </div>
                         </div>

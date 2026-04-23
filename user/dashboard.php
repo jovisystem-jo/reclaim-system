@@ -8,7 +8,7 @@ $userID = $_SESSION['userID'];
 
 // Get user statistics - FIXED: Use correct column names
 $stmt = $db->prepare("
-    SELECT 
+    SELECT
         (SELECT COUNT(*) FROM items WHERE reported_by = ?) as my_reports,
         (SELECT COUNT(*) FROM claim_requests WHERE claimant_id = ?) as my_claims,
         (SELECT COUNT(*) FROM claim_requests WHERE claimant_id = ? AND status = 'approved') as approved_claims
@@ -32,9 +32,6 @@ $stmt->execute([$userID]);
 $recent_items = $stmt->fetchAll();
 
 $base_url = '/reclaim-system/';
-if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
-    define('RECLAIM_EMBEDDED_LAYOUT', true);
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -55,15 +52,31 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             margin-bottom: 30px;
             transition: transform 0.3s;
         }
+        .dashboard-content {
+            padding-top: 18px;
+        }
         .report-card:hover {
             transform: translateY(-5px);
         }
+
+        .content-wrapper {
+    margin-top: 20px; /* adjust: 20px–40px */
+}
         .report-card i {
             font-size: 48px;
             margin-bottom: 15px;
         }
+        .report-card .report-icon-lost {
+            color: #dc3545;
+        }
+        .report-card .report-icon-found {
+            color: #28a745;
+        }
         .report-card h3 {
             margin-bottom: 15px;
+        }
+        .report-card p {
+            color: #fff;
         }
         .report-card .btn-report {
             background: white;
@@ -73,6 +86,16 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             border-radius: 50px;
             font-weight: bold;
             margin-top: 15px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-align: center;
+        }
+        .report-card .btn-report i {
+            font-size: 1rem;
+            margin-bottom: 0;
+            line-height: 1;
         }
         .report-card .btn-report:hover {
             transform: scale(1.05);
@@ -94,6 +117,15 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             color: #FF8C00;
             margin-bottom: 10px;
         }
+        .stat-card .stat-icon-reports {
+            color: #ff8c00;
+        }
+        .stat-card .stat-icon-claims {
+            color: #f39c12;
+        }
+        .stat-card .stat-icon-approved {
+            color: #27ae60;
+        }
         .stat-card h3 {
             font-size: 28px;
             margin: 10px 0;
@@ -109,13 +141,184 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             margin: 30px 0 20px 0;
             color: #333;
         }
+
+        /* Item Card Styles - Matching index.php */
+        .item-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .item-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .item-card-image {
+            height: 180px;
+            width: 100%;
+            object-fit: cover;
+        }
+        .item-card-placeholder {
+            height: 180px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa;
+        }
+        .item-card .card-body {
+            padding: 15px;
+        }
+        /* Fix for badge alignment */
+        .item-card .d-flex {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: flex-start !important;
+            width: 100%;
+        }
+        .item-card .card-title {
+            flex: 1;
+            word-break: break-word;
+            padding-right: 10px;
+            margin-bottom: 0;
+            font-size: 0.9rem;
+            font-weight: 600;
+            line-height: 1.4;
+        }
+        .status-badge {
+            flex-shrink: 0;
+            white-space: nowrap;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+        }
+        .badge-lost { background-color: #dc3545; }
+        .badge-found { background-color: #28a745; }
+        .badge-returned { background-color: #17a2b8; }
+        .item-meta {
+            margin-top: 10px;
+        }
+        .item-meta-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .item-meta-row i {
+            width: 18px;
+            font-size: 11px;
+            color: #FF8C00;
+        }
+        .item-meta-row span {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .card-footer {
+            background-color: transparent;
+            border-top: 1px solid #e9ecef;
+            padding: 12px 15px;
+        }
+        .card-footer .btn {
+            width: 100%;
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+        .quick-nav-buttons .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-align: center;
+        }
+        .quick-nav-buttons .btn i {
+            line-height: 1;
+        }
+
+        /* Notification Styles */
+        .notification-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .notification-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e0e0e0;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        .notification-item:hover {
+            background: #f8f9fa;
+        }
+        .notification-item.unread {
+            background: #fff8f0;
+            border-left: 3px solid #FF8C00;
+        }
+        .notification-item.unread:hover {
+            background: #fff0e0;
+        }
+        .notification-icon-sm {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .notification-icon-sm.info { background: #e3f2fd; color: #2196f3; }
+        .notification-icon-sm.success { background: #e8f5e9; color: #4caf50; }
+        .notification-icon-sm.warning { background: #fff3e0; color: #ff9800; }
+        .notification-icon-sm.danger { background: #ffebee; color: #f44336; }
+        .notification-content-sm {
+            flex: 1;
+            min-width: 0;
+        }
+        .notification-title-sm {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 3px;
+            color: #333;
+        }
+        .notification-message-sm {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+        .notification-time-sm {
+            font-size: 11px;
+            color: #999;
+        }
+        .view-all-link {
+            display: block;
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            color: #FF8C00;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 13px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .view-all-link:hover {
+            background: #e9ecef;
+            text-decoration: underline;
+        }
+        .no-notifications {
+            padding: 40px 20px;
+            text-align: center;
+            color: #999;
+        }
+        .no-notifications i {
+            font-size: 48px;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
     </style>
 </head>
-<body class="app-page user-page">
+<body>
     <?php include __DIR__ . '/../includes/header.php'; ?>
-    
+
     <main class="page-shell page-shell--compact">
-    <div class="container content-wrapper">
+    <div class="container content-wrapper dashboard-content">
         <!-- Welcome Banner -->
         <div class="alert alert-success fade-in" style="background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%); border: none;">
             <h4 class="mb-2"><i class="fas fa-smile-wink"></i> Welcome back, <?= htmlspecialchars($_SESSION['name']) ?>!</h4>
@@ -126,7 +329,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         <div class="row mb-5">
             <div class="col-md-6">
                 <div class="report-card">
-                    <i class="fas fa-frown"></i>
+                    <i class="fas fa-frown report-icon-lost"></i>
                     <h3>I Lost an Item</h3>
                     <p>Report a lost item and get help finding it</p>
                     <a href="<?= $base_url ?>user/report-item.php?type=lost" class="btn btn-report">
@@ -136,7 +339,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             </div>
             <div class="col-md-6">
                 <div class="report-card">
-                    <i class="fas fa-smile"></i>
+                    <i class="fas fa-smile report-icon-found"></i>
                     <h3>I Found an Item</h3>
                     <p>Report a found item and help someone reclaim it</p>
                     <a href="<?= $base_url ?>user/report-item.php?type=found" class="btn btn-report">
@@ -149,23 +352,23 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         <!-- Statistics Section -->
         <h4 class="section-title"><i class="fas fa-chart-line"></i> Your Activity Statistics</h4>
         <div class="row mb-5">
-            <div class="col-md-4 mb-3">
+                <div class="col-md-4 mb-3">
                 <div class="stat-card">
-                    <i class="fas fa-clipboard-list"></i>
+                    <i class="fas fa-clipboard-list stat-icon-reports"></i>
                     <h3><?= $stats['my_reports'] ?></h3>
                     <p>Items Reported</p>
                 </div>
             </div>
             <div class="col-md-4 mb-3">
                 <div class="stat-card">
-                    <i class="fas fa-hand-paper"></i>
+                    <i class="fas fa-hand-paper stat-icon-claims"></i>
                     <h3><?= $stats['my_claims'] ?></h3>
                     <p>Claims Submitted</p>
                 </div>
             </div>
             <div class="col-md-4 mb-3">
                 <div class="stat-card">
-                    <i class="fas fa-check-circle"></i>
+                    <i class="fas fa-check-circle stat-icon-approved"></i>
                     <h3><?= $stats['approved_claims'] ?></h3>
                     <p>Approved Claims</p>
                 </div>
@@ -174,7 +377,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
 
         <!-- Recent Items Reported -->
         <h4 class="section-title"><i class="fas fa-history"></i> Recently Reported Items</h4>
-        <div class="row mb-4">
+        <div class="row g-4 mb-4">
             <?php if(empty($recent_items)): ?>
                 <div class="col-12">
                     <div class="alert alert-info text-center">
@@ -184,27 +387,45 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                 </div>
             <?php else: ?>
                 <?php foreach($recent_items as $item): ?>
-                <div class="col-md-4 mb-3">
-                    <div class="card h-100">
-                        <?php if($item['image_url']): ?>
-                            <img src="<?= $base_url . $item['image_url'] ?>" class="card-img-top" alt="Item image" style="height: 150px; object-fit: cover;">
+                <div class="col-md-6 col-xl-4">
+                    <div class="card item-card h-100">
+                        <?php
+                        $hasImage = !empty($item['image_url']) && file_exists(__DIR__ . '/../' . $item['image_url']);
+                        $imageUrl = $hasImage ? $base_url . $item['image_url'] : '';
+                        ?>
+                        <?php if($hasImage): ?>
+                            <img src="<?= $imageUrl ?>" class="item-card-image" alt="Item image">
                         <?php else: ?>
-                            <div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height: 150px;">
-                                <i class="fas fa-box-open fa-3x" style="color: #FF8C00;"></i>
+                            <div class="item-card-placeholder">
+                                <i class="fas fa-box-open fa-4x" style="color: #FF8C00;"></i>
                             </div>
                         <?php endif; ?>
                         <div class="card-body">
-                            <h6 class="card-title"><?= htmlspecialchars(substr($item['description'], 0, 50)) ?>...</h6>
-                            <p class="card-text small">
-                                <i class="fas fa-map-marker-alt"></i> <?= htmlspecialchars($item['found_location'] ?? $item['location']) ?><br>
-                                <i class="fas fa-calendar"></i> <?= date('M d, Y', strtotime($item['reported_date'])) ?>
-                            </p>
-                            <span class="badge bg-<?= $item['status'] == 'lost' ? 'danger' : 'success' ?>">
-                                <?= ucfirst($item['status']) ?>
-                            </span>
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h6 class="card-title"><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 60)) ?>...</h6>
+                                <span class="status-badge <?= ($item['status'] ?? 'found') == 'lost' ? 'badge-lost' : (($item['status'] ?? 'found') == 'returned' ? 'badge-returned' : 'badge-found') ?>">
+                                    <?= ucfirst($item['status'] ?? 'found') ?>
+                                </span>
+                            </div>
+                            <div class="item-meta">
+                                <div class="item-meta-row">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                    <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?></span>
+                                </div>
+                                <div class="item-meta-row">
+                                    <i class="fas fa-tag"></i>
+                                    <span><?= htmlspecialchars($item['category'] ?? 'N/A') ?></span>
+                                </div>
+                                <div class="item-meta-row">
+                                    <i class="fas fa-calendar"></i>
+                                    <span><?= date('M d, Y', strtotime($item['reported_date'])) ?></span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="card-footer bg-transparent">
-                            <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-outline-primary">View Details</a>
+                        <div class="card-footer">
+                            <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-eye me-1"></i> View Details
+                            </a>
                         </div>
                     </div>
                 </div>
@@ -213,7 +434,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         </div>
 
         <div class="row">
-            <!-- Recent Activity - FIXED: Use correct column names -->
+            <!-- Recent Activity -->
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
@@ -230,7 +451,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                         $stmt->execute([$userID, $userID]);
                         $activities = $stmt->fetchAll();
                         ?>
-                        
+
                         <?php if(empty($activities)): ?>
                             <p class="text-muted text-center py-3">No recent activity</p>
                         <?php else: ?>
@@ -238,7 +459,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                                 <?php foreach($activities as $activity): ?>
                                     <li class="mb-2 pb-2 border-bottom">
                                         <i class="fas fa-<?= $activity['type'] == 'report' ? 'flag-checkered' : 'file-alt' ?> me-2" style="color: #FF8C00;"></i>
-                                        <strong><?= ucfirst($activity['type']) ?></strong> submitted 
+                                        <strong><?= ucfirst($activity['type']) ?></strong> submitted
                                         <small class="text-muted float-end"><?= time_ago($activity['date']) ?></small>
                                     </li>
                                 <?php endforeach; ?>
@@ -247,32 +468,80 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                     </div>
                 </div>
             </div>
-            
-            <!-- Quick Navigation -->
+
+            <!-- Recent Notifications -->
             <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-bell"></i> Recent Notifications</h5>
+                        <?php if($unread_count > 0): ?>
+                            <span class="badge bg-danger"><?= $unread_count ?> new</span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="card-body p-0">
+                        <?php if(empty($notifications)): ?>
+                            <div class="no-notifications">
+                                <i class="fas fa-bell-slash"></i>
+                                <p>No notifications yet</p>
+                                <small>You'll see updates here when someone interacts with your reports</small>
+                            </div>
+                        <?php else: ?>
+                            <div class="notification-list">
+                                <?php foreach($notifications as $notif): ?>
+                                    <div class="notification-item <?= $notif['is_read'] == 0 ? 'unread' : '' ?>" onclick="window.location.href='<?= $base_url ?>user/notifications.php'">
+                                        <div class="d-flex">
+                                            <div class="notification-icon-sm <?= $notif['type'] ?>">
+                                                <i class="fas <?= $notif['type'] == 'info' ? 'fa-info-circle' : ($notif['type'] == 'success' ? 'fa-check-circle' : ($notif['type'] == 'warning' ? 'fa-exclamation-triangle' : 'fa-times-circle')) ?>"></i>
+                                            </div>
+                                            <div class="notification-content-sm">
+                                                <div class="notification-title-sm"><?= htmlspecialchars($notif['title'] ?? 'Notification') ?></div>
+                                                <div class="notification-message-sm"><?= htmlspecialchars(substr($notif['message'], 0, 80)) ?><?= strlen($notif['message']) > 80 ? '...' : '' ?></div>
+                                                <div class="notification-time-sm">
+                                                    <i class="far fa-clock me-1"></i><?= time_ago($notif['created_at']) ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <a href="<?= $base_url ?>user/notifications.php" class="view-all-link">
+                                <i class="fas fa-arrow-right me-1"></i> View all notifications
+                                <?php if($unread_count > 0): ?>
+                                    <span class="badge bg-danger ms-1"><?= $unread_count ?> new</span>
+                                <?php endif; ?>
+                            </a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <!-- Quick Navigation -->
+            <div class="col-md-12">
                 <div class="card">
                     <div class="card-header">
                         <h5><i class="fas fa-compass"></i> Quick Navigation</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6 mb-2">
-                                <a href="<?= $base_url ?>search.php" class="btn btn-outline-primary w-100 text-start">
+                        <div class="row quick-nav-buttons">
+                            <div class="col-md-3 mb-2">
+                                <a href="<?= $base_url ?>search.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-search"></i> Search for Items
                                 </a>
                             </div>
-                            <div class="col-md-6 mb-2">
-                                <a href="<?= $base_url ?>user/my-claims.php" class="btn btn-outline-primary w-100 text-start">
+                            <div class="col-md-3 mb-2">
+                                <a href="<?= $base_url ?>user/my-claims.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-file-alt"></i> View My Claims
                                 </a>
                             </div>
-                            <div class="col-md-6 mb-2">
-                                <a href="<?= $base_url ?>user/user-profile.php" class="btn btn-outline-primary w-100 text-start">
+                            <div class="col-md-3 mb-2">
+                                <a href="<?= $base_url ?>user/user-profile.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-user"></i> My Profile
                                 </a>
                             </div>
-                            <div class="col-md-6 mb-2">
-                                <a href="<?= $base_url ?>user/dashboard.php" class="btn btn-outline-primary w-100 text-start">
+                            <div class="col-md-3 mb-2">
+                                <a href="<?= $base_url ?>user/dashboard.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-tachometer-alt"></i> Dashboard
                                 </a>
                             </div>
@@ -283,31 +552,22 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         </div>
     </div>
     </main>
-    
+
     <?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>
 </html>
 
 <?php
 function time_ago($timestamp) {
+    if (!$timestamp) return 'Never';
     $time_ago = strtotime($timestamp);
     $current_time = time();
     $time_difference = $current_time - $time_ago;
-    $seconds = $time_difference;
-    
-    $minutes = round($seconds / 60);
-    $hours = round($seconds / 3600);
-    $days = round($seconds / 86400);
-    $weeks = round($seconds / 604800);
-    $months = round($seconds / 2629440);
-    $years = round($seconds / 31553280);
-    
-    if($seconds <= 60) return "Just now";
-    else if($minutes <= 60) return ($minutes == 1) ? "1 minute ago" : "$minutes minutes ago";
-    else if($hours <= 24) return ($hours == 1) ? "1 hour ago" : "$hours hours ago";
-    else if($days <= 7) return ($days == 1) ? "yesterday" : "$days days ago";
-    else if($weeks <= 4.3) return ($weeks == 1) ? "1 week ago" : "$weeks weeks ago";
-    else if($months <= 12) return ($months == 1) ? "1 month ago" : "$months months ago";
-    else return ($years == 1) ? "1 year ago" : "$years years ago";
+
+    if($time_difference < 60) return "Just now";
+    if($time_difference < 3600) return floor($time_difference / 60) . " minutes ago";
+    if($time_difference < 86400) return floor($time_difference / 3600) . " hours ago";
+    if($time_difference < 604800) return floor($time_difference / 86400) . " days ago";
+    return date('M d, Y', $time_ago);
 }
 ?>

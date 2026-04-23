@@ -142,9 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Please fill in all required fields (Title, Category, Description, Location, and Date)';
         }
     } else {
-        // For found items: location is NOT required (removed)
-        if (empty($title) || empty($category) || empty($description) || empty($date_occurred)) {
-            $error = 'Please fill in all required fields (Title, Category, Description, and Date)';
+        // For found items: location is now required (for admin visibility)
+        if (empty($title) || empty($category) || empty($description) || empty($date_occurred) || empty($location_found)) {
+            $error = 'Please fill in all required fields (Title, Category, Description, Location, and Date)';
         }
     }
     
@@ -156,8 +156,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ");
             
-            // For found items, location_found can be empty
-            $location_value = ($type === 'lost') ? $location_found : '';
+            // Store location_found for both lost and found items
+            $location_value = $location_found;
             
             if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
                 $itemID = $db->lastInsertId();
@@ -216,6 +216,11 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             border-radius: 15px;
             margin-bottom: 20px;
         }
+
+        .content-wrapper {
+            margin-top: 20px; /* adjust: 20px–40px */
+        }
+        
         .form-section-title {
             font-weight: 700;
             margin-bottom: 20px;
@@ -404,15 +409,14 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                                         </select>
                                     </div>
                                     
-                                    <!-- Location Field - Only for Lost Items -->
-                                    <?php if ($type === 'lost'): ?>
+                                    <!-- Location Field - Required for both Lost and Found items -->
                                     <div class="col-md-6 mb-3">
-                                        <label class="form-label required-field">Location Where Lost</label>
+                                        <label class="form-label required-field">Location Where <?= $type === 'lost' ? 'Lost' : 'Found' ?></label>
                                         <input type="text" name="location" class="form-control" required 
                                                placeholder="e.g., Library, G3, Cafeteria, etc." 
                                                value="<?= htmlspecialchars($_POST['location'] ?? '') ?>">
+                                        <small class="text-muted">This information will only be visible to administrators for security purposes.</small>
                                     </div>
-                                    <?php endif; ?>
                                 </div>
                                 
                                 <div class="row">

@@ -27,7 +27,7 @@ if ($image_analysis_id > 0) {
     $stmt = $db->prepare("SELECT * FROM image_analysis WHERE analysis_id = ?");
     $stmt->execute([$image_analysis_id]);
     $analysis = $stmt->fetch();
-    
+
     if ($analysis) {
         $labels = json_decode($analysis['labels'], true);
         if (is_array($labels) && !empty($labels)) {
@@ -99,7 +99,7 @@ $stmt->execute($params);
 $search_results = $stmt->fetchAll();
 $total_results = count($search_results);
 
-$has_filters = !empty($search_query) || !empty($category) || !empty($status) || !empty($location) || 
+$has_filters = !empty($search_query) || !empty($category) || !empty($status) || !empty($location) ||
                !empty($date_from) || !empty($date_to) || !empty($item_title) || $image_analysis_id > 0;
 
 // Log search only if there's a search query
@@ -130,11 +130,47 @@ if ($image_analysis_id > 0) {
 <!-- Additional styles specific to search page -->
 <style>
     .item-card {
-        transition: transform 0.2s, box-shadow 0.2s;
+        transition: transform 0.2s;
+        margin-bottom: 20px;
     }
+
+    .content-wrapper {
+            margin-top: 20px; /* adjust: 20px–40px */
+        }
+
     .item-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        transform: translateY(-5px);
+    }
+    .badge-lost { background-color: #dc3545; }
+    .badge-found { background-color: #28a745; }
+    .badge-returned { background-color: #17a2b8; }
+    .status-badge {
+        padding: 5px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    .item-card-image,
+    .item-card-placeholder {
+        width: 100%;
+        height: 180px;
+    }
+    .item-card-image {
+        object-fit: cover;
+    }
+    .item-card-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .action-buttons {
+        display: flex;
+        gap: 5px;
+        justify-content: flex-end;
+    }
+    .action-buttons .btn-sm {
+        padding: 4px 8px;
+        font-size: 12px;
     }
     .search-layout {
         row-gap: 24px;
@@ -160,6 +196,16 @@ if ($image_analysis_id > 0) {
     .detected-label {
         padding: 4px 12px;
     }
+    .search-filters .d-grid .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        text-align: center;
+    }
+    .search-filters .d-grid .btn i {
+        line-height: 1;
+    }
 </style>
 
 <main class="page-shell page-shell--compact">
@@ -176,21 +222,21 @@ if ($image_analysis_id > 0) {
                         <!-- Main Search -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Keyword Search</label>
-                            <input type="text" name="query" class="form-control" 
+                            <input type="text" name="query" class="form-control"
                                    placeholder="Search by title, description, category..."
                                    value="<?= htmlspecialchars($search_query) ?>">
                         </div>
-                        
+
                         <hr>
-                        
+
                         <!-- Item Title -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Item Title</label>
-                            <input type="text" name="item_title" class="form-control" 
+                            <input type="text" name="item_title" class="form-control"
                                    placeholder="Specific item title..."
                                    value="<?= htmlspecialchars($item_title) ?>">
                         </div>
-                        
+
                         <!-- Category -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Category</label>
@@ -208,7 +254,7 @@ if ($image_analysis_id > 0) {
                                 <option value="Others" <?= $category == 'Others' ? 'selected' : '' ?>>📦 Others</option>
                             </select>
                         </div>
-                        
+
                         <!-- Status -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Status</label>
@@ -218,24 +264,24 @@ if ($image_analysis_id > 0) {
                                 <option value="found" <?= $status == 'found' ? 'selected' : '' ?>>✅ Found</option>
                             </select>
                         </div>
-                        
+
                         <!-- Location -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Location</label>
-                            <input type="text" name="location" class="form-control" 
+                            <input type="text" name="location" class="form-control"
                                    placeholder="e.g., Library, Cafeteria..."
                                    value="<?= htmlspecialchars($location) ?>">
                             <?php if(!empty($locations)): ?>
-                                <small class="text-muted">Common: 
+                                <small class="text-muted">Common:
                                     <?php foreach(array_slice($locations, 0, 5) as $loc): ?>
                                         <span class="badge bg-light text-dark me-1"><?= htmlspecialchars($loc['found_location']) ?></span>
                                     <?php endforeach; ?>
                                 </small>
                             <?php endif; ?>
                         </div>
-                        
+
                         <hr>
-                        
+
                         <!-- Date Range -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">Date Range</label>
@@ -250,9 +296,9 @@ if ($image_analysis_id > 0) {
                                 </div>
                             </div>
                         </div>
-                        
+
                         <hr>
-                        
+
                         <div class="d-grid gap-2">
                             <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-search"></i> Apply Filters
@@ -262,9 +308,9 @@ if ($image_analysis_id > 0) {
                             </a>
                         </div>
                     </form>
-                    
+
                     <hr>
-                    
+
                     <!-- Image Search -->
                     <div class="text-center">
                         <p class="mb-2 fw-bold">Search by Image</p>
@@ -277,7 +323,7 @@ if ($image_analysis_id > 0) {
                 </div>
             </div>
         </div>
-        
+
         <!-- Search Results -->
         <div class="col-lg-8 col-xl-9">
             <!-- Image Search Banner -->
@@ -292,17 +338,17 @@ if ($image_analysis_id > 0) {
                 </div>
                 <div class="detected-labels">
                     <span class="small">Detected:</span>
-                    <?php 
+                    <?php
                     $labels = json_decode($image_analysis_data['labels'], true);
                     if (is_array($labels)):
-                        foreach($labels as $label): 
+                        foreach($labels as $label):
                     ?>
                         <span class="detected-label"><?= htmlspecialchars($label) ?></span>
                     <?php endforeach; endif; ?>
                 </div>
             </div>
             <?php endif; ?>
-            
+
             <div class="card">
                 <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-search"></i> Items List</h5>
@@ -311,7 +357,7 @@ if ($image_analysis_id > 0) {
                 <div class="card-body">
                     <!-- Active Filters Display -->
                     <?php if($has_filters): ?>
-                        <?php 
+                        <?php
                             $active_filters = array();
                             if(!empty($search_query)) $active_filters[] = "Keyword: " . htmlspecialchars($search_query);
                             if(!empty($item_title)) $active_filters[] = "Title: " . htmlspecialchars($item_title);
@@ -338,7 +384,7 @@ if ($image_analysis_id > 0) {
                             <i class="fas fa-info-circle"></i> Showing all items. Use filters to narrow down your search.
                         </div>
                     <?php endif; ?>
-                    
+
                     <?php if(empty($search_results)): ?>
                         <div class="alert alert-warning text-center py-5">
                             <i class="fas fa-box-open fa-3x mb-3 d-block"></i>
@@ -355,50 +401,45 @@ if ($image_analysis_id > 0) {
                     <?php else: ?>
                         <div class="row">
                             <?php foreach($search_results as $item): ?>
-                            <div class="col-md-6 mb-3">
-                                <div class="card h-100 item-card">
-                                    <div class="row g-0 h-100">
-                                        <div class="col-md-4">
-                                            <?php 
-                                            $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
-                                            $imageUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
-                                            ?>
-                                            <?php if($hasImage): ?>
-                                                <img src="<?= $imageUrl ?>" class="img-fluid rounded-start" style="height: 150px; width: 100%; object-fit: cover;">
-                                            <?php else: ?>
-                                                <div class="bg-light d-flex align-items-center justify-content-center" style="height: 150px;">
-                                                    <i class="fas fa-box-open fa-3x" style="color: #f39c12;"></i>
-                                                </div>
-                                            <?php endif; ?>
+                            <div class="col-md-6 col-xl-4">
+                                <div class="card item-card h-100">
+                                    <?php
+                                    $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
+                                    $imageUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
+                                    ?>
+                                    <?php if($hasImage): ?>
+                                        <img src="<?= $imageUrl ?>" class="card-img-top item-card-image" alt="Item image">
+                                    <?php else: ?>
+                                        <div class="card-img-top bg-light item-card-placeholder">
+                                            <i class="fas fa-box-open fa-4x" style="color: #FF8C00;"></i>
                                         </div>
-                                        <div class="col-md-8">
-                                            <div class="card-body">
-                                                <h6 class="card-title fw-bold"><?= htmlspecialchars($item['title'] ?? $item['description']) ?></h6>
-                                                <p class="card-text small">
-                                                    <?= htmlspecialchars(substr($item['description'] ?? '', 0, 80)) ?>...
-                                                </p>
-                                                <p class="card-text">
-                                                    <small class="text-muted d-block">
-                                                        <i class="fas fa-map-marker-alt"></i> <?= htmlspecialchars($item['found_location'] ?? 'N/A') ?>
-                                                    </small>
-                                                    <small class="text-muted d-block">
-                                                        <i class="fas fa-tag"></i> <?= htmlspecialchars($item['category'] ?? 'N/A') ?>
-                                                    </small>
-                                                    <?php if(!empty($item['date_found'])): ?>
-                                                    <small class="text-muted d-block">
-                                                        <i class="fas fa-calendar"></i> <?= date('M d, Y', strtotime($item['date_found'])) ?>
-                                                    </small>
-                                                    <?php endif; ?>
-                                                </p>
-                                                <div class="d-flex justify-content-between align-items-center">
-                                                    <span class="badge <?= ($item['status'] ?? '') == 'lost' ? 'bg-danger' : 'bg-success' ?>">
+                                    <?php endif; ?>
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0"><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 60)) ?>...</h6>
+                                            <span class="status-badge badge-<?= htmlspecialchars($item['status'] ?? 'found') ?>">
+                                                <?= ucfirst($item['status'] ?? 'found') ?>
+                                            </span>
+                                        </div>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="fas fa-map-marker-alt"></i> <?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?><br>
+                                            <i class="fas fa-tag"></i> <?= htmlspecialchars($item['category'] ?? 'N/A') ?><br>
+                                            <?php if(!empty($item['date_found'])): ?>
+                                                <i class="fas fa-calendar"></i> <?= date('M d, Y', strtotime($item['date_found'])) ?>
+                                            <?php elseif(!empty($item['reported_date'])): ?>
+                                                <i class="fas fa-calendar"></i> <?= date('M d, Y', strtotime($item['reported_date'])) ?>
+                                            <?php endif; ?>
+                                        </p>
+                                    </div>
+
+                                    <div class="card-footer bg-transparent">
+                                        <div class="action-buttons">
+                                            <span class="d-none">
                                                         <?= ($item['status'] ?? '') == 'lost' ? '❌ Lost' : '✅ Found' ?>
-                                                    </span>
-                                                    <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-primary">
-                                                        View Details <i class="fas fa-arrow-right"></i>
-                                                    </a>
-                                                </div>
-                                            </div>
+                                            </span>
+                                            <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-outline-primary">
+                                                <i class="fas fa-eye"></i> View Details
+                                            </a>
                                         </div>
                                     </div>
                                 </div>
@@ -419,12 +460,12 @@ document.getElementById('imageSearch').addEventListener('change', function(e) {
         const formData = new FormData();
         formData.append('image', e.target.files[0]);
         formData.append('csrf_token', '<?= csrf_token() ?>'); // Security: protect upload endpoint from CSRF.
-        
+
         const btn = document.querySelector('button[onclick*="imageSearch"]');
         const originalText = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
         btn.disabled = true;
-        
+
         fetch('<?= $base_url ?>api/search-by-image.php', {
             method: 'POST',
             body: formData

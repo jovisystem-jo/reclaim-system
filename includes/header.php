@@ -89,6 +89,181 @@ $body_classes = implode(' ', [
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
+    <style>
+        /* Notification Dropdown Styles - Restored */
+        .notification-dropdown {
+            width: 380px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 0;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        
+        .notification-header {
+            background: linear-gradient(135deg, #FF6B35, #E85D2C);
+            color: white;
+            padding: 12px 16px;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            border-radius: 12px 12px 0 0;
+        }
+        
+        .notification-header h6 {
+            margin: 0;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+        
+        .notification-header small {
+            opacity: 0.9;
+            cursor: pointer;
+            font-size: 0.7rem;
+        }
+        
+        .notification-header small:hover {
+            text-decoration: underline;
+        }
+        
+        .dropdown-header-info {
+            font-size: 0.65rem;
+            opacity: 0.85;
+            margin-top: 2px;
+        }
+        
+        .notification-item {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        
+        .notification-item:hover {
+            background: #f8f9fa;
+        }
+        
+        .notification-item.unread {
+            background: #fff8f0;
+            border-left: 3px solid #FF6B35;
+        }
+        
+        .notification-item.unread:hover {
+            background: #fff0e0;
+        }
+        
+        .notification-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        
+        .notification-icon.info { background: #e3f2fd; color: #2196f3; }
+        .notification-icon.success { background: #e8f5e9; color: #4caf50; }
+        .notification-icon.warning { background: #fff3e0; color: #ff9800; }
+        .notification-icon.danger { background: #ffebee; color: #f44336; }
+        
+        .notification-icon i {
+            font-size: 14px;
+        }
+        
+        .notification-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .notification-title {
+            font-weight: 700;
+            font-size: 0.85rem;
+            margin-bottom: 3px;
+            color: #333;
+        }
+        
+        .notification-message {
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 3px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        
+        .notification-time {
+            font-size: 0.65rem;
+            color: #999;
+        }
+        
+        .notification-footer {
+            padding: 10px 14px;
+            text-align: center;
+            background: #f8f9fa;
+            border-top: 1px solid rgba(0,0,0,0.06);
+            position: sticky;
+            bottom: 0;
+        }
+        
+        .notification-footer a {
+            color: #FF6B35;
+            text-decoration: none;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .notification-footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .no-notifications {
+            padding: 30px 20px;
+            text-align: center;
+            color: #999;
+        }
+        
+        .no-notifications i {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+        
+        .no-notifications p {
+            margin-bottom: 5px;
+            font-size: 0.85rem;
+        }
+        
+        .no-notifications small {
+            font-size: 0.7rem;
+        }
+        
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -8px;
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: bold;
+            min-width: 18px;
+            text-align: center;
+        }
+        
+        .nav-link.notification-link {
+            position: relative;
+        }
+        
+        /* Responsive notification dropdown */
+        @media (max-width: 576px) {
+            .notification-dropdown {
+                width: calc(100vw - 20px);
+                right: -10px;
+            }
+        }
+    </style>
 </head>
 <body class="<?= htmlspecialchars($body_classes) ?>">
 <?php endif; ?>
@@ -335,5 +510,7 @@ $body_classes = implode(' ', [
         setInterval(updateNotificationCount, 30000);
     });
     </script>
+<?php if (!$embedded_layout): ?>
 </body>
 </html>
+<?php endif; ?>

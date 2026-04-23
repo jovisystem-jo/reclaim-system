@@ -84,6 +84,10 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         * {
             font-family: 'Inter', sans-serif;
         }
+
+        .content-wrapper {
+            margin-top: 20px; /* adjust: 20px–40px */
+        }
         
         body {
             background: #f0f2f5;
@@ -119,10 +123,14 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             padding: 8px 20px;
             margin-right: 10px;
             text-decoration: none;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
             border: 1px solid #ddd;
             color: #666;
             transition: all 0.3s;
+            text-align: center;
         }
         .filter-btn.active {
             background: #FF8C00;

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 requireLogin();
+require_once __DIR__ . '/../includes/functions.php';
 
 $db = Database::getInstance()->getConnection();
 $userID = $_SESSION['userID'];
@@ -20,7 +21,7 @@ $user = $stmt->fetch();
 
 // Get user statistics
 $stmt = $db->prepare("
-    SELECT 
+    SELECT
         (SELECT COUNT(*) FROM items WHERE reported_by = ?) as total_reports,
         (SELECT COUNT(*) FROM claim_requests WHERE claimant_id = ?) as total_claims,
         (SELECT COUNT(*) FROM claim_requests WHERE claimant_id = ? AND status = 'approved') as approved_claims,
@@ -39,7 +40,63 @@ $stmt = $db->prepare("
 $stmt->execute([$userID, $userID]);
 $activities = $stmt->fetchAll();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// Handle Profile Photo Upload
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_photo'])) {
+    require_csrf_token();
+    
+    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] !== UPLOAD_ERR_NO_FILE) {
+        $uploadDir = __DIR__ . '/../assets/uploads/profiles/';
+        
+        // Create directory if not exists
+        if (!file_exists($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
+        }
+        
+        // Delete old profile image if exists
+        if (!empty($user['profile_image']) && file_exists(__DIR__ . '/../' . $user['profile_image'])) {
+            unlink(__DIR__ . '/../' . $user['profile_image']);
+        }
+        
+        // Upload new image
+        $upload = secure_image_upload($_FILES['profile_image'], $uploadDir, 'assets/uploads/profiles');
+        
+        if ($upload['success']) {
+            $stmt = $db->prepare("UPDATE users SET profile_image = ? WHERE user_id = ?");
+            $stmt->execute([$upload['path'], $userID]);
+            $success = 'Profile photo updated successfully!';
+            
+            // Refresh user data
+            $stmt = $db->prepare("SELECT * FROM users WHERE user_id = ?");
+            $stmt->execute([$userID]);
+            $user = $stmt->fetch();
+        } else {
+            $error = $upload['message'];
+        }
+    } else {
+        $error = 'Please select an image to upload.';
+    }
+}
+
+// Handle Remove Profile Photo
+if (isset($_GET['remove_photo']) && $_GET['remove_photo'] == 1) {
+    require_csrf_token();
+    
+    if (!empty($user['profile_image']) && file_exists(__DIR__ . '/../' . $user['profile_image'])) {
+        unlink(__DIR__ . '/../' . $user['profile_image']);
+    }
+    
+    $stmt = $db->prepare("UPDATE users SET profile_image = NULL WHERE user_id = ?");
+    $stmt->execute([$userID]);
+    $success = 'Profile photo removed successfully!';
+    
+    // Refresh user data
+    $stmt = $db->prepare("SELECT * FROM users WHERE user_id = ?");
+    $stmt->execute([$userID]);
+    $user = $stmt->fetch();
+}
+
+// Handle Update Profile Info
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     require_csrf_token();
 
     $name = trim($_POST['name'] ?? '');
@@ -49,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $bio = trim($_POST['bio'] ?? '');
     $current_password = $_POST['current_password'] ?? '';
     $new_password = $_POST['new_password'] ?? '';
-    
+
     if (empty($name)) {
         $error = 'Name is required';
     } else {
@@ -57,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Update basic info
             $stmt = $db->prepare("UPDATE users SET name = ?, phone = ?, department = ?, student_staff_id = ? WHERE user_id = ?");
             $stmt->execute([$name, $phone, $department, $student_staff_id, $userID]);
-            
+
             // Update password if provided
             $password_updated = false;
             if (!empty($current_password) && !empty($new_password)) {
@@ -79,14 +136,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $success = 'Profile updated successfully!';
             }
-            
+
             // If no error, refresh user data
             if (empty($error)) {
                 $stmt = $db->prepare("SELECT * FROM users WHERE user_id = ?");
                 $stmt->execute([$userID]);
                 $user = $stmt->fetch();
                 $_SESSION['name'] = $user['name'];
-                
+
                 if (!$password_updated && empty($success)) {
                     $success = 'Profile updated successfully!';
                 }
@@ -96,6 +153,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Unable to update profile. Please try again.';
         }
     }
+}
+
+// Helper function to get profile image URL
+function getProfileImageUrl($imagePath, $base_url) {
+    if (!empty($imagePath) && file_exists(__DIR__ . '/../' . $imagePath)) {
+        return $base_url . $imagePath;
+    }
+    return '';
 }
 ?>
 
@@ -109,6 +174,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
     <style>
+        .content-wrapper {
+            margin-top: 20px;
+        }
+
         .profile-header {
             background: linear-gradient(135deg, var(--primary-orange), var(--dark-orange));
             border-radius: 15px;
@@ -118,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             position: relative;
             overflow: hidden;
         }
-        
+
         .profile-header::before {
             content: '';
             position: absolute;
@@ -129,7 +198,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
             transform: rotate(45deg);
         }
-        
+
+        .profile-header h2,
+        .profile-header p,
+        .profile-header i,
+        .profile-header .badge-role,
+        .profile-header .member-since {
+            color: #fff;
+        }
+
         .profile-avatar {
             width: 120px;
             height: 120px;
@@ -140,13 +217,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             justify-content: center;
             margin: 0 auto 20px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
         }
-        
+
+        .profile-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
         .profile-avatar i {
             font-size: 60px;
             color: var(--primary-orange);
         }
-        
+
+        .profile-avatar .avatar-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            padding: 8px;
+            transform: translateY(100%);
+            transition: transform 0.3s;
+            cursor: pointer;
+        }
+
+        .profile-avatar:hover .avatar-overlay {
+            transform: translateY(0);
+        }
+
+        .avatar-overlay i {
+            font-size: 16px;
+            color: white;
+            margin: 0;
+        }
+
         .stat-card-profile {
             background: white;
             border-radius: 15px;
@@ -156,29 +265,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             transition: transform 0.3s, box-shadow 0.3s;
             margin-bottom: 20px;
         }
-        
+
         .stat-card-profile:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 30px rgba(0,0,0,0.15);
         }
-        
+
         .stat-card-profile i {
             font-size: 40px;
             margin-bottom: 10px;
         }
-        
+
         .stat-card-profile h3 {
             font-size: 28px;
             margin: 10px 0;
             color: #333;
         }
-        
+
         .stat-card-profile p {
             color: #666;
             margin: 0;
             font-size: 14px;
         }
-        
+
         .info-card {
             border: none;
             border-radius: 15px;
@@ -186,29 +295,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-bottom: 20px;
             transition: transform 0.2s;
         }
-        
+
         .info-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 8px 25px rgba(0,0,0,0.12);
         }
-        
+
         .info-card .card-header {
             background: white;
             border-bottom: 2px solid var(--primary-orange);
             padding: 15px 20px;
             border-radius: 15px 15px 0 0;
         }
-        
+
         .info-card .card-header h5 {
             margin: 0;
             color: var(--dark-orange);
         }
-        
+
         .activity-timeline {
             position: relative;
             padding-left: 30px;
         }
-        
+
         .activity-timeline::before {
             content: '';
             position: absolute;
@@ -218,7 +327,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             width: 2px;
             background: linear-gradient(to bottom, var(--primary-orange), var(--dark-orange));
         }
-        
+
         .activity-item {
             position: relative;
             margin-bottom: 20px;
@@ -227,12 +336,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-radius: 10px;
             transition: all 0.3s;
         }
-        
+
         .activity-item:hover {
             background: #e9ecef;
             transform: translateX(5px);
         }
-        
+
         .activity-item::before {
             content: '';
             position: absolute;
@@ -245,7 +354,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 2px solid white;
             box-shadow: 0 0 0 2px var(--primary-orange);
         }
-        
+
         .activity-icon {
             width: 35px;
             height: 35px;
@@ -255,38 +364,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             justify-content: center;
             margin-right: 10px;
         }
-        
+
         .form-label {
             font-weight: 500;
             color: #555;
         }
-        
+
         .btn-primary {
             background: linear-gradient(135deg, var(--primary-orange), var(--dark-orange));
             border: none;
             padding: 10px 25px;
             transition: all 0.3s;
         }
-        
+
         .btn-primary:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(255, 140, 0, 0.3);
         }
-        
+
         .btn-outline-primary {
             border-color: var(--primary-orange);
             color: var(--primary-orange);
         }
-        
+
         .btn-outline-primary:hover {
             background: var(--primary-orange);
             border-color: var(--primary-orange);
         }
-        
+
+        .quick-actions-buttons .btn,
+        .profile-form-actions .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .quick-actions-buttons .btn {
+            width: 100%;
+            gap: 8px;
+        }
+
+        .profile-form-actions .btn {
+            gap: 8px;
+        }
+
+        .quick-actions-buttons .btn i,
+        .profile-form-actions .btn i {
+            line-height: 1;
+        }
+
         .profile-section {
             animation: fadeInUp 0.5s ease-out;
         }
-        
+
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -297,39 +428,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 transform: translateY(0);
             }
         }
-        
-        .edit-icon {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 50%;
-            width: 35px;
-            height: 35px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .edit-icon:hover {
-            background: rgba(255,255,255,0.3);
-            transform: scale(1.1);
-        }
-        
+
         .member-since {
             font-size: 12px;
             opacity: 0.8;
         }
-        
+
         .badge-role {
             background: rgba(255,255,255,0.2);
             padding: 5px 15px;
             border-radius: 20px;
             font-size: 12px;
         }
-        
+
         .password-strength {
             height: 3px;
             background: #e0e0e0;
@@ -337,48 +448,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-top: 5px;
             overflow: hidden;
         }
-        
+
         .password-strength-bar {
             height: 100%;
             width: 0%;
             transition: width 0.3s;
         }
-        
+
         .strength-weak { background: #dc3545; width: 33%; }
         .strength-medium { background: #ffc107; width: 66%; }
         .strength-strong { background: #28a745; width: 100%; }
-        
+
         .required-field::after {
             content: '*';
             color: red;
             margin-left: 4px;
         }
+        
+        /* Profile Photo Modal */
+        .photo-preview {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin: 0 auto 20px;
+            display: block;
+            border: 3px solid var(--primary-orange);
+            padding: 3px;
+        }
     </style>
 </head>
 <body class="app-page user-page">
     <?php include __DIR__ . '/../includes/header.php'; ?>
-    
+
     <main class="page-shell page-shell--compact">
     <div class="container content-wrapper">
         <!-- Profile Header -->
         <div class="profile-header fade-in">
             <div class="row align-items-center">
                 <div class="col-md-3 text-center">
-                    <div class="profile-avatar">
-                        <i class="fas fa-user-circle"></i>
+                    <div class="profile-avatar" id="profileAvatar" onclick="document.getElementById('photoUploadInput').click();">
+                        <?php 
+                        $profileImage = getProfileImageUrl($user['profile_image'] ?? '', $base_url);
+                        if ($profileImage): ?>
+                            <img src="<?= $profileImage ?>" alt="Profile Photo">
+                        <?php else: ?>
+                            <i class="fas fa-user-circle"></i>
+                        <?php endif; ?>
+                        <div class="avatar-overlay">
+                            <i class="fas fa-camera"></i> Change
+                        </div>
                     </div>
+                    <form method="POST" enctype="multipart/form-data" id="photoUploadForm" style="display: none;">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="upload_photo" value="1">
+                        <input type="file" name="profile_image" id="photoUploadInput" accept="image/*" onchange="this.form.submit()">
+                    </form>
+                    <?php if ($profileImage): ?>
+                        <a href="?remove_photo=1&csrf_token=<?= urlencode(csrf_token()) ?>" class="btn btn-sm btn-outline-light mt-2" onclick="return confirm('Remove your profile photo?')">
+                            <i class="fas fa-trash-alt"></i> Remove Photo
+                        </a>
+                    <?php endif; ?>
                 </div>
                 <div class="col-md-9">
                     <h2 class="mb-2"><?= htmlspecialchars($user['name']) ?></h2>
                     <p class="mb-2">
                         <span class="badge-role">
-                            <i class="fas <?= $user['role'] == 'student' ? 'fa-user-graduate' : ($user['role'] == 'staff' ? 'fa-chalkboard-teacher' : 'fa-shield-alt') ?>"></i> 
+                            <i class="fas <?= $user['role'] == 'student' ? 'fa-user-graduate' : ($user['role'] == 'staff' ? 'fa-chalkboard-teacher' : 'fa-shield-alt') ?>"></i>
                             <?= $user['role'] == 'student' ? 'Student' : ($user['role'] == 'staff' ? 'Staff' : ucfirst($user['role'])) ?>
                         </span>
                         <span class="badge-role ms-2">
                             <i class="fas fa-id-card"></i> ID: <?= htmlspecialchars($user['student_staff_id'] ?? 'Not set') ?>
                         </span>
-                    </p>    
+                    </p>
                     <p class="mb-1">
                         <i class="fas fa-envelope me-2"></i> <?= htmlspecialchars($user['email']) ?>
                     </p>
@@ -391,7 +533,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             </div>
         </div>
-        
+
         <div class="row">
             <!-- Left Column - Statistics & Activity -->
             <div class="col-lg-4">
@@ -406,7 +548,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                     <div class="col-6">
                         <div class="stat-card-profile">
-                            <i class="fas fa-hand-paper" style="color: var(--primary-orange);"></i>
+                            <i class="fas fa-hand-paper" style="color: #3498db;"></i>
                             <h3><?= $stats['total_claims'] ?></h3>
                             <p>Claims Made</p>
                         </div>
@@ -426,7 +568,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Recent Activity -->
                 <div class="info-card">
                     <div class="card-header">
@@ -441,7 +583,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <div class="activity-item">
                                         <div class="d-flex align-items-center">
                                             <div class="activity-icon <?= $activity['type'] == 'report' ? 'bg-danger bg-opacity-10' : 'bg-success bg-opacity-10' ?>">
-                                                <i class="fas fa-<?= $activity['type'] == 'report' ? 'flag-checkered' : 'file-alt' ?>" 
+                                                <i class="fas fa-<?= $activity['type'] == 'report' ? 'flag-checkered' : 'file-alt' ?>"
                                                    style="color: <?= $activity['type'] == 'report' ? '#dc3545' : '#28a745' ?>"></i>
                                             </div>
                                             <div class="flex-grow-1">
@@ -456,14 +598,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endif; ?>
                     </div>
                 </div>
-                
+
                 <!-- Quick Actions -->
                 <div class="info-card">
                     <div class="card-header">
                         <h5><i class="fas fa-bolt me-2" style="color: var(--primary-orange);"></i> Quick Actions</h5>
                     </div>
                     <div class="card-body">
-                        <div class="d-grid gap-2">
+                        <div class="d-grid gap-2 quick-actions-buttons">
                             <a href="<?= $base_url ?>user/report-item.php?type=lost" class="btn btn-outline-primary">
                                 <i class="fas fa-frown"></i> Report Lost Item
                             </a>
@@ -480,7 +622,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
             </div>
-            
+
             <!-- Right Column - Edit Profile Form -->
             <div class="col-lg-8">
                 <div class="info-card profile-section">
@@ -495,69 +637,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                             </div>
                         <?php endif; ?>
-                        
+
                         <?php if($success): ?>
                             <div class="alert alert-success alert-dismissible fade show" role="alert">
                                 <i class="fas fa-check-circle me-2"></i> <?= htmlspecialchars($success) ?>
                                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                             </div>
                         <?php endif; ?>
-                        
+
                         <form method="POST" action="" id="profileForm">
                             <?= csrf_field() ?>
+                            <input type="hidden" name="update_profile" value="1">
                             <div class="row">
                                 <div class="col-md-12 mb-3">
                                     <label class="form-label required-field">
                                         <i class="fas fa-user me-1 text-muted"></i> Full Name
                                     </label>
-                                    <input type="text" name="name" class="form-control" 
+                                    <input type="text" name="name" class="form-control"
                                            value="<?= htmlspecialchars($user['name']) ?>" required>
                                 </div>
-                                
+
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">
                                         <i class="fas fa-id-card me-1 text-muted"></i> Student/Staff ID
                                     </label>
-                                    <input type="text" name="student_staff_id" class="form-control" 
+                                    <input type="text" name="student_staff_id" class="form-control"
                                            value="<?= htmlspecialchars($user['student_staff_id'] ?? '') ?>"
                                            placeholder="e.g., STU12345 or STAFF001">
                                     <small class="text-muted">Optional - helps verify your identity</small>
                                 </div>
-                                
+
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">
                                         <i class="fas fa-phone me-1 text-muted"></i> Phone Number
                                     </label>
-                                    <input type="tel" name="phone" class="form-control" 
+                                    <input type="tel" name="phone" class="form-control"
                                            value="<?= htmlspecialchars($user['phone'] ?? '') ?>"
                                            placeholder="+6012-3456789">
                                 </div>
-                                
+
                                 <div class="col-md-12 mb-3">
                                     <label class="form-label">
                                         <i class="fas fa-building me-1 text-muted"></i> Department
                                     </label>
-                                    <input type="text" name="department" class="form-control" 
+                                    <input type="text" name="department" class="form-control"
                                            value="<?= htmlspecialchars($user['department'] ?? '') ?>"
                                            placeholder="e.g., Computer Science, Human Resources">
                                 </div>
-                                
+
                                 <div class="col-md-12 mb-3">
                                     <label class="form-label">
                                         <i class="fas fa-envelope me-1 text-muted"></i> Email Address
                                     </label>
-                                    <input type="email" class="form-control" 
+                                    <input type="email" class="form-control"
                                            value="<?= htmlspecialchars($user['email']) ?>" disabled>
                                     <small class="text-muted">Email cannot be changed. Contact admin for assistance.</small>
                                 </div>
                             </div>
-                            
+
                             <hr class="my-4">
-                            
+
                             <h6 class="mb-3">
                                 <i class="fas fa-lock me-2" style="color: var(--primary-orange);"></i> Change Password
                             </h6>
-                            
+
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Current Password</label>
@@ -572,8 +715,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <small class="text-muted">Minimum 6 characters</small>
                                 </div>
                             </div>
-                            
-                            <div class="d-flex gap-2 mt-3">
+
+                            <div class="d-flex gap-2 mt-3 profile-form-actions">
                                 <button type="submit" class="btn btn-primary">
                                     <i class="fas fa-save me-2"></i> Save Changes
                                 </button>
@@ -587,7 +730,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </form>
                     </div>
                 </div>
-                
+
                 <!-- Account Security Info -->
                 <div class="info-card">
                     <div class="card-header">
@@ -616,7 +759,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
     </div>
-    
+
     <!-- Delete Account Modal -->
     <div class="modal fade" id="deleteModal" tabindex="-1">
         <div class="modal-dialog">
@@ -647,17 +790,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
     </div>
-    
+
     </main>
 
     <?php include __DIR__ . '/../includes/footer.php'; ?>
-    
+
     <script>
     // Password strength checker
     document.getElementById('newPassword').addEventListener('input', function() {
         const password = this.value;
         const strengthBar = document.getElementById('passwordStrengthBar');
-        
+
         if (password.length === 0) {
             strengthBar.style.width = '0%';
             strengthBar.className = 'password-strength-bar';
@@ -672,56 +815,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             strengthBar.className = 'password-strength-bar strength-strong';
         }
     });
-    
+
     // Form validation
     document.getElementById('profileForm').addEventListener('submit', function(e) {
         const currentPassword = document.getElementById('currentPassword').value;
         const newPassword = document.getElementById('newPassword').value;
-        
+
         if ((currentPassword && !newPassword) || (!currentPassword && newPassword)) {
             e.preventDefault();
             alert('Please fill in both current and new password fields to change password');
         }
     });
-    
+
     // Delete account confirmation
     function confirmDelete() {
         const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
         modal.show();
     }
-    
+
     function deleteAccount() {
-    const confirmText = document.getElementById('deleteConfirm').value;
-    if (confirmText === 'DELETE') {
-        if (confirm('⚠️ WARNING: This action is permanent and cannot be undone!\n\nAll your data including reports, claims, and profile information will be permanently removed.\n\nAre you absolutely sure you want to delete your account?')) {
-            // Show loading indicator
-            const deleteBtn = document.querySelector('#deleteModal .btn-danger');
-            const originalText = deleteBtn.innerHTML;
-            deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-            deleteBtn.disabled = true;
-            
-            // Security: submit account deletion as POST with a CSRF token.
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '<?= $base_url ?>api/delete-account.php';
-            const token = document.createElement('input');
-            token.type = 'hidden';
-            token.name = 'csrf_token';
-            token.value = '<?= csrf_token() ?>';
-            form.appendChild(token);
-            const confirmation = document.createElement('input');
-            confirmation.type = 'hidden';
-            confirmation.name = 'confirm_delete';
-            confirmation.value = confirmText;
-            form.appendChild(confirmation);
-            document.body.appendChild(form);
-            form.submit();
+        const confirmText = document.getElementById('deleteConfirm').value;
+        if (confirmText === 'DELETE') {
+            if (confirm('⚠️ WARNING: This action is permanent and cannot be undone!\n\nAll your data including reports, claims, and profile information will be permanently removed.\n\nAre you absolutely sure you want to delete your account?')) {
+                const deleteBtn = document.querySelector('#deleteModal .btn-danger');
+                const originalText = deleteBtn.innerHTML;
+                deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+                deleteBtn.disabled = true;
+
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '<?= $base_url ?>api/delete-account.php';
+                const token = document.createElement('input');
+                token.type = 'hidden';
+                token.name = 'csrf_token';
+                token.value = '<?= csrf_token() ?>';
+                form.appendChild(token);
+                const confirmation = document.createElement('input');
+                confirmation.type = 'hidden';
+                confirmation.name = 'confirm_delete';
+                confirmation.value = confirmText;
+                form.appendChild(confirmation);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        } else {
+            alert('Please type DELETE to confirm account deletion');
         }
-    } else {
-        alert('Please type DELETE to confirm account deletion');
     }
-}
-    
+
     // Auto-hide alerts after 5 seconds
     setTimeout(function() {
         const alerts = document.querySelectorAll('.alert');
@@ -743,14 +884,14 @@ function time_ago($timestamp) {
     $current_time = time();
     $time_difference = $current_time - $time_ago;
     $seconds = $time_difference;
-    
+
     $minutes = round($seconds / 60);
     $hours = round($seconds / 3600);
     $days = round($seconds / 86400);
     $weeks = round($seconds / 604800);
     $months = round($seconds / 2629440);
     $years = round($seconds / 31553280);
-    
+
     if($seconds <= 60) return "Just now";
     else if($minutes <= 60) return ($minutes == 1) ? "1 minute ago" : "$minutes minutes ago";
     else if($hours <= 24) return ($hours == 1) ? "1 hour ago" : "$hours hours ago";

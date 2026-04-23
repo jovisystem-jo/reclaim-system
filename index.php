@@ -109,6 +109,7 @@ $base_url = '/reclaim-system/';
 
     .hero-subtitle {
         font-size: 1.2rem;
+        color: #fff;
         opacity: 0.95;
         margin-bottom: 30px;
         position: relative;
@@ -198,6 +199,10 @@ $base_url = '/reclaim-system/';
     }
 
     .stat-icon i { font-size: 32px; color: var(--primary); }
+    .stat-icon-lost i { color: #dc3545; }
+    .stat-icon-found i { color: #27ae60; }
+    .stat-icon-claimed i { color: #3498db; }
+    .stat-icon-returned i { color: #27ae60; }
     .stat-number { font-size: 2.5rem; font-weight: 800; color: var(--dark); margin: 10px 0 5px; }
     .stat-label { color: var(--gray); font-weight: 500; margin: 0; }
 
@@ -215,57 +220,86 @@ $base_url = '/reclaim-system/';
     .section-title { font-size: 2.5rem; font-weight: 800; color: var(--dark); margin-bottom: 15px; }
     .section-subtitle { color: var(--gray); font-size: 1.1rem; max-width: 600px; margin: 0 auto; }
 
-    .item-card-modern {
-        background: white;
-        border-radius: 20px;
+    /* Item Card Styles */
+    .item-card {
+        transition: transform 0.2s, box-shadow 0.2s;
+        border-radius: 12px;
         overflow: hidden;
-        transition: all 0.3s;
-        border: none;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.08);
-        height: 100%;
     }
-
-    .item-card-modern:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+    .item-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     }
-
-    .item-image {
-        height: 220px;
-        object-fit: cover;
-        transition: transform 0.5s;
+    .item-card-image {
+        height: 180px;
         width: 100%;
+        object-fit: cover;
     }
-
-    .item-card-modern:hover .item-image { transform: scale(1.05); }
-
-    .image-placeholder {
-        height: 220px;
-        background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+    .item-card-placeholder {
+        height: 180px;
         display: flex;
         align-items: center;
         justify-content: center;
+        background-color: #f8f9fa;
     }
-
-    .image-placeholder i { font-size: 64px; color: var(--primary); opacity: 0.5; }
-
-    .item-badge {
-        position: absolute;
-        top: 15px;
-        right: 15px;
-        padding: 6px 15px;
-        border-radius: 50px;
-        font-size: 0.75rem;
+    .item-card .card-body {
+        padding: 15px;
+    }
+    /* Fix for badge alignment */
+    .item-card .d-flex {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: flex-start !important;
+        width: 100%;
+    }
+    .item-card .card-title {
+        flex: 1;
+        word-break: break-word;
+        padding-right: 10px;
+        margin-bottom: 0;
+        font-size: 0.9rem;
         font-weight: 600;
-        z-index: 1;
+        line-height: 1.4;
     }
-
-    .badge-lost { background: linear-gradient(135deg, var(--danger), #c0392b); color: white; }
-    .badge-found { background: linear-gradient(135deg, var(--success), #1e8449); color: white; }
-
-    .item-title { font-size: 1.1rem; font-weight: 700; color: var(--dark); margin-bottom: 10px; line-height: 1.4; }
-    .item-meta { font-size: 0.85rem; color: var(--gray); margin-bottom: 5px; }
-    .item-meta i { width: 20px; color: var(--primary); }
+    .status-badge {
+        flex-shrink: 0;
+        white-space: nowrap;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: bold;
+        color: white;
+    }
+    .badge-lost { background-color: #dc3545; }
+    .badge-found { background-color: #28a745; }
+    .badge-returned { background-color: #17a2b8; }
+    .item-meta {
+        margin-top: 10px;
+    }
+    .item-meta-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+    .item-meta-row i {
+        width: 18px;
+        font-size: 11px;
+        color: #FF8C00;
+    }
+    .item-meta-row span {
+        font-size: 12px;
+        color: #6c757d;
+    }
+    .card-footer {
+        background-color: transparent;
+        border-top: 1px solid #e9ecef;
+        padding: 12px 15px;
+    }
+    .card-footer .btn {
+        width: 100%;
+        font-size: 12px;
+        padding: 6px 12px;
+    }
 
     .step-card {
         text-align: center;
@@ -358,6 +392,14 @@ $base_url = '/reclaim-system/';
 
     .cta-title { font-size: 2rem; font-weight: 800; margin-bottom: 15px; }
 
+    .cta-section,
+    .cta-section h3,
+    .cta-section p,
+    .cta-section small,
+    .cta-section i {
+        color: #fff;
+    }
+
     .cta-buttons .btn {
         margin: 0 10px;
         padding: 12px 30px;
@@ -449,28 +491,28 @@ $base_url = '/reclaim-system/';
     <div class="row mt-5 g-4">
         <div class="col-md-3 col-sm-6">
             <div class="stat-card-modern fade-in-up" style="animation-delay: 0.1s">
-                <div class="stat-icon"><i class="fas fa-frown"></i></div>
+                <div class="stat-icon stat-icon-lost"><i class="fas fa-frown"></i></div>
                 <div class="stat-number"><?= number_format($stats['total_lost']) ?></div>
                 <p class="stat-label">Items Reported Lost</p>
             </div>
         </div>
         <div class="col-md-3 col-sm-6">
             <div class="stat-card-modern fade-in-up" style="animation-delay: 0.2s">
-                <div class="stat-icon"><i class="fas fa-smile"></i></div>
+                <div class="stat-icon stat-icon-found"><i class="fas fa-smile"></i></div>
                 <div class="stat-number"><?= number_format($stats['total_found']) ?></div>
                 <p class="stat-label">Items Found</p>
             </div>
         </div>
         <div class="col-md-3 col-sm-6">
             <div class="stat-card-modern fade-in-up" style="animation-delay: 0.3s">
-                <div class="stat-icon"><i class="fas fa-hand-paper"></i></div>
+                <div class="stat-icon stat-icon-claimed"><i class="fas fa-hand-paper"></i></div>
                 <div class="stat-number"><?= number_format($stats['total_claimed']) ?></div>
                 <p class="stat-label">Claims Processed</p>
             </div>
         </div>
         <div class="col-md-3 col-sm-6">
             <div class="stat-card-modern fade-in-up" style="animation-delay: 0.4s">
-                <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+                <div class="stat-icon stat-icon-returned"><i class="fas fa-check-circle"></i></div>
                 <div class="stat-number"><?= number_format($stats['total_returned']) ?></div>
                 <p class="stat-label">Successfully Returned</p>
             </div>
@@ -497,52 +539,45 @@ $base_url = '/reclaim-system/';
                 </div>
             <?php else: ?>
                 <?php foreach($recent_items as $item): ?>
-                    <div class="col-md-6 col-lg-4 fade-in-up">
-                        <div class="item-card-modern">
-                            <div class="position-relative">
-                                <?php 
-                                $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
-                                $imageUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
-                                ?>
-                                <?php if($hasImage): ?>
-                                    <img src="<?= $imageUrl ?>" class="item-image w-100" alt="Item image">
-                                <?php else: ?>
-                                    <div class="image-placeholder">
-                                        <i class="fas fa-box-open"></i>
+                    <div class="col-md-6 col-xl-4 fade-in-up">
+                        <div class="card item-card h-100">
+                            <?php
+                            $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
+                            $imageUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
+                            ?>
+                            <?php if($hasImage): ?>
+                                <img src="<?= $imageUrl ?>" class="item-card-image" alt="Item image">
+                            <?php else: ?>
+                                <div class="item-card-placeholder">
+                                    <i class="fas fa-box-open fa-4x" style="color: #FF8C00;"></i>
+                                </div>
+                            <?php endif; ?>
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <h6 class="card-title"><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 60)) ?>...</h6>
+                                    <span class="status-badge <?= ($item['status'] ?? 'found') == 'lost' ? 'badge-lost' : (($item['status'] ?? 'found') == 'returned' ? 'badge-returned' : 'badge-found') ?>">
+                                        <?= ucfirst($item['status'] ?? 'found') ?>
+                                    </span>
+                                </div>
+                                <div class="item-meta">
+                                    <div class="item-meta-row">
+                                        <i class="fas fa-map-marker-alt"></i>
+                                        <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'Not specified') ?></span>
                                     </div>
-                                <?php endif; ?>
-                                <span class="item-badge <?= $item['status'] == 'lost' ? 'badge-lost' : 'badge-found' ?>">
-                                    <i class="fas fa-<?= $item['status'] == 'lost' ? 'times-circle' : 'check-circle' ?> me-1"></i>
-                                    <?= ucfirst($item['status']) ?>
-                                </span>
+                                    <div class="item-meta-row">
+                                        <i class="fas fa-tag"></i>
+                                        <span><?= htmlspecialchars($item['category'] ?? 'N/A') ?></span>
+                                    </div>
+                                    <div class="item-meta-row">
+                                        <i class="fas fa-calendar"></i>
+                                        <span><?= date('M d, Y', strtotime($item['reported_date'])) ?></span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="p-3">
-                                <h5 class="item-title"><?= htmlspecialchars($item['title'] ?? $item['description']) ?></h5>
-                                <div class="item-meta">
-                                    <i class="fas fa-map-marker-alt"></i> <?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'Not specified') ?>
-                                </div>
-                                <div class="item-meta">
-                                    <i class="fas fa-calendar-alt"></i> <?= date('M d, Y', strtotime($item['reported_date'])) ?>
-                                </div>
-                                <?php if(!empty($item['category'])): ?>
-                                    <div class="item-meta">
-                                        <i class="fas fa-tag"></i> <?= htmlspecialchars($item['category']) ?>
-                                    </div>
-                                <?php endif; ?>
-                                <div class="mt-3 d-flex gap-2">
-                                    <a href="item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-outline-primary btn-sm flex-grow-1">
-                                        <i class="fas fa-eye"></i> View Details
-                                    </a>
-                                    <?php if(isset($_SESSION['userID'])): ?>
-                                        <button onclick="claimItem(<?= $item['item_id'] ?>)" class="btn btn-primary btn-sm flex-grow-1">
-                                            <i class="fas fa-hand-paper"></i> Claim
-                                        </button>
-                                    <?php else: ?>
-                                        <a href="<?= $base_url ?>login.php?redirect=item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-primary btn-sm flex-grow-1">
-                                            <i class="fas fa-hand-paper"></i> Claim
-                                        </a>
-                                    <?php endif; ?>
-                                </div>
+                            <div class="card-footer">
+                                <a href="<?= $base_url ?>item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-eye me-1"></i> View Details
+                                </a>
                             </div>
                         </div>
                     </div>
@@ -699,7 +734,7 @@ document.getElementById('imageUpload').addEventListener('change', function(e) {
     if(e.target.files.length > 0) {
         const formData = new FormData();
         formData.append('image', e.target.files[0]);
-        formData.append('csrf_token', '<?= csrf_token() ?>'); // Security: protect upload endpoint from CSRF.
+        formData.append('csrf_token', '<?= csrf_token() ?>');
         
         const btn = document.querySelector('.search-box-modern button');
         const originalText = btn.innerHTML;

@@ -19,9 +19,9 @@ if ($id == 0) {
 
 $db = Database::getInstance()->getConnection();
 
-// Get item details
+// Get item details with reporter profile image
 $stmt = $db->prepare("
-    SELECT i.*, u.name as reporter_name
+    SELECT i.*, u.name as reporter_name, u.profile_image as reporter_profile_image, u.user_id as reporter_user_id
     FROM items i
     LEFT JOIN users u ON i.reported_by = u.user_id
     WHERE i.item_id = ?
@@ -48,6 +48,14 @@ if(isset($_SESSION['userID'])) {
     $user_has_claimed = $stmt->fetchColumn() > 0;
 }
 
+// Helper function to get profile image URL
+function getReporterProfileImageUrl($imagePath, $base_url) {
+    if (!empty($imagePath) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/reclaim-system/' . $imagePath)) {
+        return $base_url . $imagePath;
+    }
+    return '';
+}
+
 // Format date with time function
 function formatDateTime($dateTime) {
     if (!$dateTime) return 'Not specified';
@@ -65,6 +73,10 @@ function formatTimeOnly($dateTime) {
 }
 
 $base_url = '/reclaim-system/';
+
+// For debugging - you can remove this after testing
+$profileImagePath = $item['reporter_profile_image'] ?? '';
+$profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
 ?>
 
 <div class="container content-wrapper">
@@ -102,7 +114,7 @@ $base_url = '/reclaim-system/';
                 </div>
             </div>
             
-            <!-- Reporter Info Card -->
+            <!-- Reporter Info Card with Profile Picture -->
             <?php if($item['reported_by']): ?>
             <div class="card border-0 shadow-sm mt-4 fade-in">
                 <div class="card-header bg-white border-0 pt-3">
@@ -110,9 +122,18 @@ $base_url = '/reclaim-system/';
                 </div>
                 <div class="card-body">
                     <div class="d-flex align-items-center">
-                        <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" style="width: 50px; height: 50px;">
-                            <i class="fas fa-user fa-2x" style="color: #FF6B35;"></i>
-                        </div>
+                        <?php 
+                        $reporterProfileImage = getReporterProfileImageUrl($item['reporter_profile_image'] ?? '', $base_url);
+                        ?>
+                        <?php if (!empty($reporterProfileImage)): ?>
+                            <div class="rounded-circle overflow-hidden" style="width: 50px; height: 50px; background-color: #f8f9fa; flex-shrink: 0;">
+                                <img src="<?= $reporterProfileImage ?>" alt="Profile" style="width: 100%; height: 100%; object-fit: cover;">
+                            </div>
+                        <?php else: ?>
+                            <div class="rounded-circle bg-light d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; flex-shrink: 0;">
+                                <i class="fas fa-user fa-2x" style="color: #FF6B35;"></i>
+                            </div>
+                        <?php endif; ?>
                         <div class="ms-3">
                             <h6 class="mb-0"><?= htmlspecialchars($item['reporter_name'] ?? 'Anonymous') ?></h6>
                             <small class="text-muted">Reporter ID: #<?= $item['reported_by'] ?></small>
@@ -225,17 +246,20 @@ $base_url = '/reclaim-system/';
                             </div>
                         </div>
                         
-                        <!-- Location Found/Lost - Only show for lost items -->
-                        <?php if ($item['status'] == 'lost'): ?>
+                        <!-- Location Found/Lost - ONLY VISIBLE TO ADMINISTRATORS -->
+                        <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && !empty($item['found_location'])): ?>
                         <div class="col-md-6">
                             <div class="bg-light rounded p-3">
-                                <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i> Location Lost</small>
-                                <strong><?= htmlspecialchars($item['found_location'] ?? 'Not specified') ?></strong>
+                                <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i>
+                                    <?= $item['status'] == 'lost' ? 'Location Lost' : 'Location Found' ?>
+                                </small>
+                                <strong><?= htmlspecialchars($item['found_location']) ?></strong>
+                                <br><small class="text-muted">(Visible to administrators only)</small>
                             </div>
                         </div>
                         <?php endif; ?>
                         
-                        <!-- Keep At / Collection Point (Only for Found Items) -->
+                        <!-- Keep At / Collection Point (Only for Found Items - visible to everyone) -->
                         <?php if ($item['status'] == 'found' && !empty($item['delivery_location'])): ?>
                         <div class="col-md-6">
                             <div class="bg-light rounded p-3">
@@ -388,8 +412,9 @@ $base_url = '/reclaim-system/';
                                     <strong><?= formatDateTime($item['date_found']) ?></strong>
                                     <span class="text-muted">(<?= timeAgo($item['date_found']) ?>)</span>
                                 </p>
-                                <?php if ($item['status'] == 'lost'): ?>
-                                    <small class="text-muted">Location: <?= htmlspecialchars($item['found_location'] ?? 'Not specified') ?></small>
+                                <!-- Location in timeline - ONLY VISIBLE TO ADMINISTRATORS -->
+                                <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && $item['status'] == 'lost' && !empty($item['found_location'])): ?>
+                                    <small class="text-muted">Location: <?= htmlspecialchars($item['found_location']) ?></small>
                                 <?php endif; ?>
                                 <?php if ($item['status'] == 'found' && !empty($item['delivery_location'])): ?>
                                     <small class="text-muted">Keep at: <?= htmlspecialchars($item['delivery_location']) ?></small>
