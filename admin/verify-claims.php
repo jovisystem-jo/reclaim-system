@@ -9,6 +9,16 @@ $notification = new NotificationSystem();
 $message = '';
 $error = '';
 
+// Get saved signature data from session
+$admin_signature = $_SESSION['admin_signature'] ?? [
+    'name' => $_SESSION['name'] ?? '',
+    'id' => $_SESSION['userID'] ?? '',
+    'position' => 'Administrator',
+    'department' => 'Auxiliary Police and Security Office',
+    'image' => '',
+    'updated_at' => ''
+];
+
 // Handle report view/print
 if (isset($_GET['view_report']) && isset($_GET['claim_id'])) {
     $claimId = (int)$_GET['claim_id'];
@@ -40,21 +50,18 @@ if (isset($_GET['view_report']) && isset($_GET['claim_id'])) {
         $founder = $stmt->fetch();
         
         // Display printable report
-        displayReport($claim, $founder, $claimId);
+        displayReport($claim, $founder, $claimId, $admin_signature);
         exit();
     }
 }
 
 // Handle claim verification
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id']) && isset($_POST['action'])) {
     require_csrf_token();
 
     $claimId = (int) $_POST['claim_id'];
     $action = $_POST['action'] ?? '';
     $admin_notes = $_POST['admin_notes'] ?? '';
-    $admin_signature = $_POST['admin_signature'] ?? '';
-    $agreement_confirmed = isset($_POST['agreement_confirmed']) ? 1 : 0;
-    $item_condition = $_POST['item_condition'] ?? 'complete';
     
     // Security: only known actions may change claim state.
     if (!in_array($action, ['approve', 'reject'], true)) {
@@ -63,15 +70,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id'])) {
 
     $status = $action === 'approve' ? 'approved' : 'rejected';
     
+    // Build signature data from session
+    $signature_data = json_encode([
+        'name' => $admin_signature['name'],
+        'id' => $admin_signature['id'],
+        'position' => $admin_signature['position'],
+        'department' => $admin_signature['department'],
+        'date' => date('F d, Y h:i A'),
+        'image' => $admin_signature['image'] ?? ''
+    ]);
+    
     if (empty($error)) {
         $stmt = $db->prepare("
             UPDATE claim_requests 
             SET status = ?, admin_notes = ?, verified_by = ?, verified_date = NOW(),
-                admin_signature = ?, agreement_confirmed = ?, item_condition = ?
+                admin_signature = ?, agreement_confirmed = 1, item_condition = 'complete'
             WHERE claim_id = ?
         ");
         
-        if ($stmt->execute([$status, $admin_notes, $_SESSION['userID'], $admin_signature, $agreement_confirmed, $item_condition, $claimId])) {
+        if ($stmt->execute([$status, $admin_notes, $_SESSION['userID'], $signature_data, $claimId])) {
             
             // Get claim details for notification
             $stmt = $db->prepare("
@@ -88,51 +105,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id'])) {
             $claim = $stmt->fetch();
             
             if ($status === 'approved') {
-            // Notify claimant
-            $claimantTitle = "✅ Claim Approved!";
-            $claimantMessage = "Congratulations! Your claim for '{$claim['item_title']}' has been approved.\n\n";
-            $claimantMessage .= "📍 Item can be collected at: {$claim['delivery_location']}\n";
-            $claimantMessage .= "📅 Please bring your ID for verification.\n\n";
-            if ($admin_notes) {
-                $claimantMessage .= "📝 Admin Notes: $admin_notes\n\n";
+                // Notify claimant
+                $claimantTitle = "✅ Claim Approved!";
+                $claimantMessage = "Congratulations! Your claim for '{$claim['item_title']}' has been approved.\n\n";
+                $claimantMessage .= "📍 Item can be collected at: {$claim['delivery_location']}\n";
+                $claimantMessage .= "📅 Please bring your ID for verification.\n\n";
+                if ($admin_notes) {
+                    $claimantMessage .= "📝 Admin Notes: $admin_notes\n\n";
+                }
+                $claimantMessage .= "Thank you for using Reclaim System!";
+                $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'success');
+                
+                // Notify founder
+                $founderTitle = "📦 Your Found Item Has Been Claimed!";
+                $founderMessage = "Good news! The item you reported as found has been claimed by the rightful owner.\n\n";
+                $founderMessage .= "📌 Item: {$claim['item_title']}\n";
+                $founderMessage .= "👤 Claimed by: {$claim['claimant_name']}\n";
+                $founderMessage .= "📍 Item was kept at: {$claim['delivery_location']}\n\n";
+                $founderMessage .= "Thank you for your honesty! 🎉";
+                $notification->send($claim['founder_id'], $founderTitle, $founderMessage, 'success');
+                
+                // Update item status
+                $stmt = $db->prepare("UPDATE items SET status = 'returned' WHERE item_id = ?");
+                $stmt->execute([$claim['item_id']]);
+            } else {
+                // Notify claimant only
+                $claimantTitle = "❌ Claim Rejected";
+                $claimantMessage = "Your claim for '{$claim['item_title']}' has been rejected.\n\n";
+                if ($admin_notes) {
+                    $claimantMessage .= "📝 Reason: $admin_notes\n\n";
+                }
+                $claimantMessage .= "Contact support if you have questions.";
+                $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'danger');
             }
-            $claimantMessage .= "Thank you for using Reclaim System!";
-            $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'success');
             
-            // Notify founder
-            $founderTitle = "📦 Your Found Item Has Been Claimed!";
-            $founderMessage = "Good news! The item you reported as found has been claimed by the rightful owner.\n\n";
-            $founderMessage .= "📌 Item: {$claim['item_title']}\n";
-            $founderMessage .= "👤 Claimed by: {$claim['claimant_name']}\n";
-            $founderMessage .= "📍 Item was kept at: {$claim['delivery_location']}\n\n";
-            $founderMessage .= "Thank you for your honesty! 🎉";
-            $notification->send($claim['founder_id'], $founderTitle, $founderMessage, 'success');
-            
-            // Update item status
-            $stmt = $db->prepare("UPDATE items SET status = 'returned' WHERE item_id = ?");
-            $stmt->execute([$claim['item_id']]);
+            $message = "Claim $status successfully.";
         } else {
-            // Notify claimant only
-            $claimantTitle = "❌ Claim Rejected";
-            $claimantMessage = "Your claim for '{$claim['item_title']}' has been rejected.\n\n";
-            if ($admin_notes) {
-                $claimantMessage .= "📝 Reason: $admin_notes\n\n";
-            }
-            $claimantMessage .= "Contact support if you have questions.";
-            $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'danger');
+            $error = "Failed to update claim";
         }
-        
-        $message = "Claim $status successfully.";
-    } else {
-        $error = "Failed to update claim";
-    }
     }
 }
 
-// Function to display printable report
-function displayReport($claim, $founder, $claimId) {
+// Function to display printable report with signature
+function displayReport($claim, $founder, $claimId, $admin_signature) {
     $receipt_number = 'RCL-' . strtoupper(uniqid()) . '-' . $claimId;
-    $date = date('F d, Y');
     ?>
     <!DOCTYPE html>
     <html lang="en">
@@ -158,10 +174,11 @@ function displayReport($claim, $founder, $claimId) {
             .info-label { width: 160px; font-weight: bold; color: #555; }
             .info-value { flex: 1; color: #333; }
             .status-badge { display: inline-block; background: #F39C12; color: white; padding: 5px 15px; border-radius: 50px; font-size: 12px; font-weight: bold; }
-            .signature-section { margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ccc; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 20px; }
-            .signature-line { text-align: center; width: 220px; }
-            .signature-line hr { margin: 30px 0 5px; width: 100%; }
-            .signature-name { font-size: 12px; font-weight: bold; color: #333; margin-top: 5px; }
+            .signature-section { margin-top: 30px; padding-top: 20px; border-top: 1px dashed #ccc; display: flex; justify-content: flex-end; }
+            .signature-card { text-align: center; width: 280px; border: 1px solid #e0e0e0; border-radius: 10px; padding: 15px; background: #fafafa; }
+            .signature-image { max-width: 180px; max-height: 60px; margin-bottom: 10px; object-fit: contain; }
+            .signature-line { width: 150px; height: 1px; background: #ccc; margin: 10px auto; }
+            .signature-name { font-size: 12px; font-weight: bold; color: #333; }
             .signature-details { font-size: 11px; color: #666; margin-top: 3px; }
             .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #999; }
             .btn-print { position: fixed; top: 20px; right: 20px; background: linear-gradient(135deg, #FF6B35, #E85D2C); color: white; border: none; padding: 10px 25px; border-radius: 50px; cursor: pointer; z-index: 1000; font-weight: 600; }
@@ -224,13 +241,19 @@ function displayReport($claim, $founder, $claimId) {
                     <div class="info-row"><div class="info-value"><?= nl2br(htmlspecialchars($claim['claimant_description'] ?? 'No description provided')) ?></div></div>
                 </div>
                 
-                <!-- SIGNATURE SECTION - Admin Only -->
+                <!-- SIGNATURE SECTION -->
                 <div class="signature-section">
-                    <div class="signature-line" style="margin: 0 auto;">
-                        <hr>
-                        <div class="signature-name">Admin Signature</div>
-                        <div class="signature-details">Name: <?= htmlspecialchars($_SESSION['name']) ?></div>
-                        <div class="signature-details">Staff ID: <?= htmlspecialchars($_SESSION['userID'] ?? 'ADMIN-' . $_SESSION['userID']) ?></div>
+                    <div class="signature-card">
+                        <h4 style="font-size: 14px; margin-bottom: 10px; color: #FF6B35;">Admin Signature</h4>
+                        <?php if (!empty($admin_signature['image'])): ?>
+                            <img src="<?= $admin_signature['image'] ?>" class="signature-image" alt="Admin Signature">
+                        <?php else: ?>
+                            <div class="signature-line"></div>
+                        <?php endif; ?>
+                        <div class="signature-name"><?= htmlspecialchars($admin_signature['name'] ?? $_SESSION['name'] ?? 'Administrator') ?></div>
+                        <div class="signature-details">ID: <?= htmlspecialchars($admin_signature['id'] ?? $_SESSION['userID'] ?? 'N/A') ?></div>
+                        <div class="signature-details">Position: <?= htmlspecialchars($admin_signature['position'] ?? 'Administrator') ?></div>
+                        <div class="signature-details">Department: <?= htmlspecialchars($admin_signature['department'] ?? 'APSeM') ?></div>
                         <div class="signature-details">Date: <?= date('F d, Y') ?></div>
                     </div>
                 </div>
@@ -316,8 +339,43 @@ $base_url = '/reclaim-system/';
         body { background: #f0f2f5; }
         .main-content { padding: 20px; min-height: 100vh; }
         
+        .btn-primary-custom {
+            background: linear-gradient(135deg, #FF6B35, #E85D2C);
+            border: none;
+            padding: 8px 20px;
+            border-radius: 50px;
+            transition: all 0.3s;
+            color: white;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255,107,53,0.3);
+            color: white;
+        }
+        .btn-secondary-custom {
+            background: #6c757d;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 50px;
+            transition: all 0.3s;
+            color: white;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-secondary-custom:hover {
+            background: #5a6268;
+            color: white;
+        }
+        
         .claim-card { background: white; border-radius: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); margin-bottom: 25px; overflow: hidden; }
         .claim-card-header { background: linear-gradient(135deg, #FF6B35, #E85D2C); color: white; padding: 15px 20px; }
+        .claim-card-header small { color: white; }
         .claim-card-body { padding: 20px; }
         
         .info-section { background: #f8f9fa; border-radius: 15px; padding: 15px; margin-bottom: 15px; }
@@ -325,28 +383,27 @@ $base_url = '/reclaim-system/';
         .proof-image { max-width: 200px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
         
         .btn-approve { background: linear-gradient(135deg, #27AE60, #1e8449); border: none; padding: 10px 30px; border-radius: 50px; color: white; }
+        .btn-approve:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(39,174,96,0.3); }
         .btn-reject { background: linear-gradient(135deg, #E74C3C, #c0392b); border: none; padding: 10px 30px; border-radius: 50px; color: white; }
-        .btn-secondary-custom { background: #6c757d; border: none; padding: 8px 20px; border-radius: 50px; color: white; text-decoration: none; }
+        .btn-reject:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(231,76,60,0.3); }
         .btn-report { background: linear-gradient(135deg, #3498DB, #2980B9); border: none; padding: 8px 20px; border-radius: 50px; color: white; text-decoration: none; display: inline-block; }
         .btn-report:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(52,152,219,0.3); color: white; }
-        
-        .signature-pad { border: 1px solid #ddd; border-radius: 10px; padding: 15px; background: #f8f9fa; margin-bottom: 15px; }
-        .signature-pad label { font-weight: 600; color: #333; margin-bottom: 8px; }
         
         .info-row { display: flex; margin-bottom: 8px; font-size: 14px; }
         .info-label { width: 140px; font-weight: 600; color: #555; }
         .info-value { flex: 1; color: #333; }
         .divider { height: 1px; background: #e0e0e0; margin: 20px 0; }
-        .action-buttons { display: flex; gap: 10px; margin-top: 20px; }
-        .agreement-box { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 10px; padding: 15px; margin: 15px 0; }
         
-        .signature-preview {
-            font-family: 'Brush Script MT', cursive;
-            font-size: 20px;
-            color: #2C3E50;
+        .current-signature-info {
+            background: #e8f8f5;
+            border-radius: 15px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #27AE60;
+        }
+        .signature-mini-preview {
+            max-height: 40px;
             margin-top: 5px;
-            padding: 5px;
-            border-bottom: 1px dashed #ccc;
         }
     </style>
 </head>
@@ -356,17 +413,61 @@ $base_url = '/reclaim-system/';
             <?php include 'sidebar.php'; ?>
             
             <div class="col-md-10 main-content content-wrapper">
-                <div class="d-flex justify-content-between align-items-center mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
                     <h2 class="fw-bold"><i class="fas fa-check-double me-2" style="color: #FF6B35;"></i> Verify Claims</h2>
-                    <a href="dashboard.php" class="btn btn-secondary-custom"><i class="fas fa-arrow-left me-2"></i> Back to Dashboard</a>
+                    <div class="d-flex gap-2">
+                        <a href="signature-settings.php" class="btn btn-primary-custom">
+                            <i class="fas fa-signature me-2"></i> Signature Settings
+                        </a>
+                        <a href="dashboard.php" class="btn btn-secondary-custom">
+                            <i class="fas fa-arrow-left me-2"></i> Back to Dashboard
+                        </a>
+                    </div>
                 </div>
                 
                 <?php if($message): ?>
-                    <div class="alert alert-success"><?= $message ?></div>
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="fas fa-check-circle me-2"></i> <?= $message ?>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
                 <?php endif; ?>
                 <?php if($error): ?>
-                    <div class="alert alert-danger"><?= $error ?></div>
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <i class="fas fa-exclamation-circle me-2"></i> <?= $error ?>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
                 <?php endif; ?>
+                
+                <!-- Current Signature Display (Read-only) -->
+                <div class="current-signature-info">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <i class="fas fa-signature me-2" style="color: #FF6B35;"></i>
+                            <strong>Current Admin Signature:</strong>
+                            <?php if (!empty($admin_signature['name'])): ?>
+                                <?= htmlspecialchars($admin_signature['name']) ?> 
+                                (ID: <?= htmlspecialchars($admin_signature['id']) ?>)
+                            <?php else: ?>
+                                <span class="text-muted">Not configured</span>
+                            <?php endif; ?>
+                        </div>
+                        <a href="signature-settings.php" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-edit"></i> Edit Signature
+                        </a>
+                    </div>
+                    <?php if (!empty($admin_signature['image'])): ?>
+                        <div class="mt-2">
+                            <img src="<?= $admin_signature['image'] ?>" alt="Signature" class="signature-mini-preview" style="max-height: 40px;">
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($admin_signature['position']) || !empty($admin_signature['department'])): ?>
+                        <div class="small text-muted mt-1">
+                            <?= htmlspecialchars($admin_signature['position']) ?>
+                            <?php if (!empty($admin_signature['position']) && !empty($admin_signature['department'])): ?> | <?php endif; ?>
+                            <?= htmlspecialchars($admin_signature['department']) ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
                 
                 <?php if(empty($pending_claims)): ?>
                     <div class="card text-center py-5">
@@ -413,7 +514,7 @@ $base_url = '/reclaim-system/';
                                     <div class="info-section">
                                         <h6>Claim Details</h6>
                                         <div class="info-row"><div class="info-label">Claim Date:</div><div class="info-value"><?= date('F d, Y', strtotime($claim['created_at'])) ?></div></div>
-                                        <div class="info-row"><div class="info-label">Claim Time:</div><div class="info-value"><?= date('h:i A', strtotime($claim['created_at'])) ?></div></div>
+                                        <div class="info-row"><div class <div class="info-row"><div class="info-label">Claim Time:</div><div class="info-value"><?= date('h:i A', strtotime($claim['created_at'])) ?></div></div>
                                     </div>
                                     <div class="info-section">
                                         <h6>Description</h6>
@@ -468,44 +569,38 @@ $base_url = '/reclaim-system/';
                             
                             <div class="divider"></div>
                             
-                            <!-- ADMIN SIGNATURE SECTION - Only Admin Signature Required -->
-                            <h5 class="mb-3"><i class="fas fa-signature me-2" style="color: #FF6B35;"></i> Admin Digital Signature (Required)</h5>
-                            <div class="signature-pad">
-                                <label class="form-label fw-bold">Admin Signature</label>
-                                <input type="text" name="admin_signature" id="admin_signature_<?= $claim['claim_id'] ?>" class="form-control" 
-                                       value="<?= htmlspecialchars($_SESSION['name']) ?>" 
-                                       placeholder="Type your name as digital signature"
-                                       style="font-family: 'Brush Script MT', cursive; font-size: 18px;">
-                                <small class="text-muted">Type your name as your digital signature. This will be recorded with your staff ID.</small>
-                                <div class="signature-preview mt-2" id="signature_preview_<?= $claim['claim_id'] ?>">
-                                    <?= htmlspecialchars($_SESSION['name']) ?>
+                            <!-- ADMIN SIGNATURE SECTION - Display current signature -->
+                            <h5 class="mb-3"><i class="fas fa-signature me-2" style="color: #FF6B35;"></i> Admin Signature (Will be applied)</h5>
+                            <div class="info-section">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="info-row"><div class="info-label">Name:</div><div class="info-value"><?= htmlspecialchars($admin_signature['name']) ?></div></div>
+                                        <div class="info-row"><div class="info-label">Staff ID:</div><div class="info-value"><?= htmlspecialchars($admin_signature['id']) ?></div></div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="info-row"><div class="info-label">Position:</div><div class="info-value"><?= htmlspecialchars($admin_signature['position']) ?></div></div>
+                                        <div class="info-row"><div class="info-label">Department:</div><div class="info-value"><?= htmlspecialchars($admin_signature['department']) ?></div></div>
+                                    </div>
+                                </div>
+                                <?php if (!empty($admin_signature['image'])): ?>
+                                    <div class="mt-2">
+                                        <img src="<?= $admin_signature['image'] ?>" alt="Signature" style="max-height: 50px;">
+                                    </div>
+                                <?php else: ?>
+                                    <div class="text-muted small mt-1">(Text signature - no image uploaded)</div>
+                                <?php endif; ?>
+                                <div class="small text-muted mt-2">
+                                    <i class="fas fa-calendar-alt me-1"></i> Date: <?= date('F d, Y') ?>
                                 </div>
                             </div>
                             
                             <div class="divider"></div>
                             
-                            <!-- AGREEMENT SECTION -->
-                            <div class="agreement-box">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="agreement_<?= $claim['claim_id'] ?>">
-                                    <label class="form-check-label" for="agreement_<?= $claim['claim_id'] ?>">
-                                        <strong>I hereby acknowledge that I have received my items in a 
-                                        <select name="item_condition" class="form-select form-select-sm d-inline-block w-auto" id="condition_<?= $claim['claim_id'] ?>">
-                                            <option value="complete">Complete</option>
-                                            <option value="incomplete">Incomplete</option>
-                                        </select> 
-                                        condition as stated in the item description section.</strong>
-                                    </label>
-                                </div>
-                            </div>
-                            
                             <!-- ACTION BUTTONS -->
                             <form method="POST" action="">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="claim_id" value="<?= $claim['claim_id'] ?>">
-                                <input type="hidden" name="admin_signature" id="admin_sig_input_<?= $claim['claim_id'] ?>" value="">
-                                <input type="hidden" name="agreement_confirmed" id="agreement_input_<?= $claim['claim_id'] ?>" value="0">
-                                <input type="hidden" name="item_condition" id="condition_input_<?= $claim['claim_id'] ?>" value="complete">
+                                <input type="hidden" name="action" id="action_<?= $claim['claim_id'] ?>" value="">
                                 
                                 <div class="mb-3">
                                     <label class="form-label fw-bold">Admin Notes</label>
@@ -513,10 +608,10 @@ $base_url = '/reclaim-system/';
                                 </div>
                                 
                                 <div class="d-flex gap-3">
-                                    <button type="submit" name="action" value="approve" class="btn btn-approve" onclick="return validateApproval(<?= $claim['claim_id'] ?>)">
+                                    <button type="button" class="btn btn-approve" onclick="setActionAndSubmit(<?= $claim['claim_id'] ?>, 'approve')">
                                         <i class="fas fa-check me-2"></i> Approve Claim
                                     </button>
-                                    <button type="submit" name="action" value="reject" class="btn btn-reject" onclick="return confirm('Reject this claim? This action cannot be undone.')">
+                                    <button type="button" class="btn btn-reject" onclick="setActionAndSubmit(<?= $claim['claim_id'] ?>, 'reject')">
                                         <i class="fas fa-times me-2"></i> Reject Claim
                                     </button>
                                 </div>
@@ -530,57 +625,33 @@ $base_url = '/reclaim-system/';
     </div>
     
     <script>
-        // Live signature preview
-        function updateSignaturePreview(claimId) {
-            const signatureInput = document.getElementById(`admin_signature_${claimId}`);
-            const previewDiv = document.getElementById(`signature_preview_${claimId}`);
-            if (signatureInput && previewDiv) {
-                previewDiv.innerHTML = signatureInput.value || '___________';
+        function setActionAndSubmit(claimId, action) {
+            const actionInput = document.getElementById(`action_${claimId}`);
+            if (actionInput) {
+                actionInput.value = action;
+            }
+            
+            if (action === 'approve') {
+                if (confirm('Approve this claim?\n\nThis will:\n✓ Notify both parties\n✓ Record your digital signature\n✓ Mark the item as returned\n\nThis action cannot be undone.')) {
+                    document.querySelector(`form input[name="claim_id"][value="${claimId}"]`).closest('form').submit();
+                }
+            } else {
+                if (confirm('Reject this claim?\n\nThis will notify the claimant and this action cannot be undone.')) {
+                    document.querySelector(`form input[name="claim_id"][value="${claimId}"]`).closest('form').submit();
+                }
             }
         }
         
-        function validateApproval(claimId) {
-            const agreementCheckbox = document.getElementById(`agreement_${claimId}`);
-            const agreementInput = document.getElementById(`agreement_input_${claimId}`);
-            const conditionSelect = document.getElementById(`condition_${claimId}`);
-            const conditionInput = document.getElementById(`condition_input_${claimId}`);
-            
-            // Get admin signature
-            const adminSig = document.getElementById(`admin_signature_${claimId}`).value;
-            const adminSigInput = document.getElementById(`admin_sig_input_${claimId}`);
-            
-            // Set signature value
-            adminSigInput.value = adminSig || 'Not signed';
-            
-            if (!agreementCheckbox.checked) {
-                alert('Please confirm the agreement before approving the claim.');
-                return false;
-            }
-            
-            if (!adminSig.trim()) {
-                alert('Please enter your admin signature.');
-                document.getElementById(`admin_signature_${claimId}`).focus();
-                return false;
-            }
-            
-            agreementInput.value = agreementCheckbox.checked ? 1 : 0;
-            conditionInput.value = conditionSelect.value;
-            
-            return confirm('Approve this claim? This will notify both parties and record your digital signature.');
-        }
-        
-        // Initialize signature preview on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            <?php foreach($pending_claims as $claim): ?>
-            const sigInput = document.getElementById(`admin_signature_<?= $claim['claim_id'] ?>`);
-            if (sigInput) {
-                sigInput.addEventListener('input', function() {
-                    updateSignaturePreview(<?= $claim['claim_id'] ?>);
-                });
-                updateSignaturePreview(<?= $claim['claim_id'] ?>);
-            }
-            <?php endforeach; ?>
-        });
+        // Auto-hide alerts after 5 seconds
+        setTimeout(function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(function(alert) {
+                setTimeout(function() {
+                    const bsAlert = new bootstrap.Alert(alert);
+                    if (bsAlert) bsAlert.close();
+                }, 5000);
+            });
+        }, 3000);
     </script>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
