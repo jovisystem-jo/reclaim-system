@@ -6,16 +6,110 @@ requireLogin();
 $db = Database::getInstance()->getConnection();
 $userID = $_SESSION['userID'];
 
-// FIXED: Use correct column names from your database
+// Handle Complete Reclaim Request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_claim'])) {
+    require_csrf_token();
+    
+    $claim_id = $_POST['claim_id'];
+    
+    // Verify claim belongs to user and is approved
+    $stmt = $db->prepare("
+        SELECT c.*, i.item_id, i.status as item_status 
+        FROM claim_requests c
+        JOIN items i ON c.item_id = i.item_id
+        WHERE c.claim_id = ? AND c.claimant_id = ? AND c.status = 'approved'
+    ");
+    $stmt->execute([$claim_id, $userID]);
+    $claim = $stmt->fetch();
+    
+    if ($claim) {
+        // Update item status to returned
+        $stmt = $db->prepare("UPDATE items SET status = 'returned' WHERE item_id = ?");
+        $stmt->execute([$claim['item_id']]);
+        
+        // Update claim status to completed
+        $stmt = $db->prepare("UPDATE claim_requests SET status = 'completed' WHERE claim_id = ?");
+        $stmt->execute([$claim_id]);
+        
+        $_SESSION['success_message'] = "Item successfully reclaimed! Thank you for confirming.";
+    } else {
+        $_SESSION['error_message'] = "Unable to complete reclaim. Please contact support.";
+    }
+    
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit();
+}
+
+// Handle Cancel Claim Request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_claim'])) {
+    require_csrf_token();
+    
+    $claim_id = $_POST['claim_id'];
+    
+    // Verify claim belongs to user and is pending
+    $stmt = $db->prepare("
+        SELECT * FROM claim_requests 
+        WHERE claim_id = ? AND claimant_id = ? AND status = 'pending'
+    ");
+    $stmt->execute([$claim_id, $userID]);
+    $claim = $stmt->fetch();
+    
+    if ($claim) {
+        $stmt = $db->prepare("UPDATE claim_requests SET status = 'cancelled' WHERE claim_id = ?");
+        $stmt->execute([$claim_id]);
+        
+        $_SESSION['success_message'] = "Claim request has been cancelled.";
+    } else {
+        $_SESSION['error_message'] = "Unable to cancel claim. Claim may already be processed.";
+    }
+    
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit();
+}
+
+// Get claims with more details
 $stmt = $db->prepare("
-    SELECT c.*, i.description as item_description, i.status as item_status, i.image_url
+    SELECT c.*, 
+           i.item_id,
+           i.title as item_title, 
+           i.description as item_description, 
+           i.status as item_status, 
+           i.image_url,
+           i.category,
+           i.found_location,
+           u.name as reporter_name
     FROM claim_requests c
     JOIN items i ON c.item_id = i.item_id
+    LEFT JOIN users u ON i.reported_by = u.user_id
     WHERE c.claimant_id = ?
     ORDER BY c.created_at DESC
 ");
 $stmt->execute([$userID]);
 $claims = $stmt->fetchAll();
+
+// Get statistics
+$stats = [
+    'total' => count($claims),
+    'pending' => 0,
+    'approved' => 0,
+    'rejected' => 0,
+    'completed' => 0,
+    'cancelled' => 0
+];
+
+foreach ($claims as $claim) {
+    switch ($claim['status']) {
+        case 'pending': $stats['pending']++; break;
+        case 'approved': $stats['approved']++; break;
+        case 'rejected': $stats['rejected']++; break;
+        case 'completed': $stats['completed']++; break;
+        case 'cancelled': $stats['cancelled']++; break;
+    }
+}
+
+$success_message = $_SESSION['success_message'] ?? '';
+$error_message = $_SESSION['error_message'] ?? '';
+unset($_SESSION['success_message'], $_SESSION['error_message']);
 
 $base_url = '/reclaim-system/';
 if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
@@ -32,10 +126,183 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="<?= $base_url ?>assets/css/style.css">
-
     <style>
         .content-wrapper {
-            margin-top: 20px; /* adjust: 20px–40px */
+            margin-top: 20px;
+        }
+        
+        /* Stats Cards */
+        .stat-card-claim {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s;
+            margin-bottom: 20px;
+        }
+        .stat-card-claim:hover {
+            transform: translateY(-3px);
+        }
+        .stat-card-claim i {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .stat-card-claim h3 {
+            font-size: 24px;
+            margin: 5px 0;
+            color: #333;
+        }
+        .stat-card-claim p {
+            color: #666;
+            margin: 0;
+            font-size: 12px;
+        }
+        
+        /* Claim Cards */
+        .claim-card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        .claim-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.12);
+        }
+        .claim-card-header {
+            padding: 12px 20px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .claim-card-body {
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .claim-image {
+            width: 100px;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 10px;
+            flex-shrink: 0;
+        }
+        .claim-placeholder {
+            width: 100px;
+            height: 100px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .claim-placeholder i {
+            font-size: 40px;
+            color: #FF8C00;
+        }
+        .claim-details {
+            flex: 1;
+            min-width: 200px;
+        }
+        .claim-details h5 {
+            margin-bottom: 10px;
+            color: #2C3E50;
+        }
+        .claim-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .claim-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 13px;
+            color: #6c757d;
+        }
+        .claim-meta-item i {
+            width: 16px;
+            color: #FF8C00;
+        }
+        .claim-footer {
+            padding: 12px 20px;
+            background-color: #f8f9fa;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .badge-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-pending { background-color: #ffc107; color: #333; }
+        .badge-approved { background-color: #28a745; color: white; }
+        .badge-rejected { background-color: #dc3545; color: white; }
+        .badge-completed { background-color: #17a2b8; color: white; }
+        .badge-cancelled { background-color: #6c757d; color: white; }
+        
+        .btn-action {
+            padding: 6px 15px;
+            font-size: 13px;
+            border-radius: 8px;
+        }
+
+        .content-wrapper .btn,
+        .modal .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .content-wrapper .btn i,
+        .modal .btn i {
+            line-height: 1;
+        }
+        
+        /* Message when no claims */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+        }
+        .empty-state i {
+            font-size: 80px;
+            color: #dee2e6;
+            margin-bottom: 20px;
+        }
+        .empty-state h4 {
+            color: #495057;
+            margin-bottom: 10px;
+        }
+        .empty-state p {
+            color: #6c757d;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .claim-card-body {
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+            }
+            .claim-meta {
+                justify-content: center;
+            }
+            .claim-footer {
+                justify-content: center;
+            }
         }
     </style>
 </head>
@@ -44,81 +311,255 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     
     <main class="page-shell page-shell--compact">
     <div class="container content-wrapper">
-        <div class="card fade-in">
-            <div class="card-header">
-                <h4><i class="fas fa-file-alt"></i> My Claim Requests</h4>
+        <!-- Page Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="fas fa-file-alt" style="color: #FF8C00;"></i> My Claim Requests</h2>
+            <a href="<?= $base_url ?>search.php" class="btn btn-primary">
+                <i class="fas fa-search"></i> Search Items
+            </a>
+        </div>
+        
+        <!-- Success/Error Messages -->
+        <?php if($success_message): ?>
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="fas fa-check-circle me-2"></i> <?= htmlspecialchars($success_message) ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
-            <div class="card-body">
-                <?php if(empty($claims)): ?>
-                    <div class="text-center py-5">
-                        <i class="fas fa-inbox fa-4x mb-3" style="color: var(--primary-orange);"></i>
-                        <h5>No claims submitted yet</h5>
-                        <p>Search for items and submit a claim to get started.</p>
-                        <a href="<?= $base_url ?>search.php" class="btn btn-primary">Search Items</a>
-                    </div>
-                <?php else: ?>
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Claim ID</th>
-                                    <th>Item</th>
-                                    <th>Claim Date</th>
-                                    <th>Status</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach($claims as $claim): ?>
-                                <tr>
-                                    <td>#<?= $claim['claim_id'] ?></td>
-                                    <td>
-                                        <strong><?= htmlspecialchars($claim['item_description']) ?></strong>
-                                    </td>
-                                    <td><?= date('M d, Y', strtotime($claim['created_at'])) ?></td>
-                                    <td>
-                                        <?php
-                                        $badgeClass = [
-                                            'pending' => 'warning',
-                                            'approved' => 'success',
-                                            'rejected' => 'danger'
-                                        ][$claim['status']] ?? 'secondary';
-                                        ?>
-                                        <span class="badge bg-<?= $badgeClass ?>">
-                                            <?= ucfirst($claim['status']) ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button onclick="viewClaim(<?= $claim['claim_id'] ?>)" class="btn btn-sm btn-info">
-                                            <i class="fas fa-eye"></i> View
-                                        </button>
-                                        <?php if($claim['status'] == 'approved'): ?>
-                                            <button onclick="completeReclaim(<?= $claim['claim_id'] ?>)" class="btn btn-sm btn-success">
-                                                <i class="fas fa-handshake"></i> Complete Reclaim
-                                            </button>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                         </table>
-                    </div>
-                <?php endif; ?>
+        <?php endif; ?>
+        
+        <?php if($error_message): ?>
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="fas fa-exclamation-circle me-2"></i> <?= htmlspecialchars($error_message) ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        <?php endif; ?>
+        
+        <!-- Statistics Cards -->
+        <?php if(!empty($claims)): ?>
+        <div class="row mb-4">
+            <div class="col-md-2 col-6">
+                <div class="stat-card-claim">
+                    <i class="fas fa-chart-line" style="color: #FF8C00;"></i>
+                    <h3><?= $stats['total'] ?></h3>
+                    <p>Total Claims</p>
+                </div>
+            </div>
+            <div class="col-md-2 col-6">
+                <div class="stat-card-claim">
+                    <i class="fas fa-clock" style="color: #ffc107;"></i>
+                    <h3><?= $stats['pending'] ?></h3>
+                    <p>Pending</p>
+                </div>
+            </div>
+            <div class="col-md-2 col-6">
+                <div class="stat-card-claim">
+                    <i class="fas fa-check-circle" style="color: #28a745;"></i>
+                    <h3><?= $stats['approved'] ?></h3>
+                    <p>Approved</p>
+                </div>
+            </div>
+            <div class="col-md-2 col-6">
+                <div class="stat-card-claim">
+                    <i class="fas fa-times-circle" style="color: #dc3545;"></i>
+                    <h3><?= $stats['rejected'] ?></h3>
+                    <p>Rejected</p>
+                </div>
+            </div>
+            <div class="col-md-2 col-6">
+                <div class="stat-card-claim">
+                    <i class="fas fa-handshake" style="color: #17a2b8;"></i>
+                    <h3><?= $stats['completed'] ?></h3>
+                    <p>Completed</p>
+                </div>
+            </div>
+            <div class="col-md-2 col-6">
+                <div class="stat-card-claim">
+                    <i class="fas fa-ban" style="color: #6c757d;"></i>
+                    <h3><?= $stats['cancelled'] ?></h3>
+                    <p>Cancelled</p>
+                </div>
             </div>
         </div>
+        <?php endif; ?>
+        
+        <!-- Claims List -->
+        <?php if(empty($claims)): ?>
+            <div class="card fade-in">
+                <div class="empty-state">
+                    <i class="fas fa-inbox"></i>
+                    <h4>No claims submitted yet</h4>
+                    <p>Search for lost or found items and submit a claim to get started.</p>
+                    <a href="<?= $base_url ?>search.php" class="btn btn-primary btn-lg">
+                        <i class="fas fa-search me-2"></i> Search for Items
+                    </a>
+                </div>
+            </div>
+        <?php else: ?>
+            <div class="row">
+                <?php foreach($claims as $claim): ?>
+                <div class="col-12">
+                    <div class="claim-card">
+                        <div class="claim-card-header">
+                            <div>
+                                <strong>Claim #<?= $claim['claim_id'] ?></strong>
+                                <small class="text-muted ms-2">
+                                    <i class="fas fa-calendar-alt"></i> <?= date('F d, Y \a\t h:i A', strtotime($claim['created_at'])) ?>
+                                </small>
+                            </div>
+                            <span class="badge-status badge-<?= $claim['status'] ?>">
+                                <?php 
+                                    $statusLabels = [
+                                        'pending' => '⏳ Pending',
+                                        'approved' => '✅ Approved',
+                                        'rejected' => '❌ Rejected',
+                                        'completed' => '🎉 Completed',
+                                        'cancelled' => '🚫 Cancelled'
+                                    ];
+                                    echo $statusLabels[$claim['status']] ?? ucfirst($claim['status']);
+                                ?>
+                            </span>
+                        </div>
+                        
+                        <div class="claim-card-body">
+                            <?php 
+                            $hasImage = !empty($claim['image_url']) && file_exists(__DIR__ . '/../' . $claim['image_url']);
+                            $imageUrl = $hasImage ? $base_url . $claim['image_url'] : '';
+                            ?>
+                            <?php if($hasImage): ?>
+                                <img src="<?= $imageUrl ?>" class="claim-image" alt="Item image">
+                            <?php else: ?>
+                                <div class="claim-placeholder">
+                                    <i class="fas fa-box-open"></i>
+                                </div>
+                            <?php endif; ?>
+                            
+                            <div class="claim-details">
+                                <h5><?= htmlspecialchars($claim['item_title']) ?></h5>
+                                <p class="text-muted small mb-2"><?= htmlspecialchars(substr($claim['item_description'] ?? '', 0, 100)) ?>...</p>
+                                
+                                <div class="claim-meta">
+                                    <div class="claim-meta-item">
+                                        <i class="fas fa-tag"></i>
+                                        <span><?= htmlspecialchars($claim['category'] ?? 'N/A') ?></span>
+                                    </div>
+                                    <div class="claim-meta-item">
+                                        <i class="fas fa-map-marker-alt"></i>
+                                        <span><?= htmlspecialchars($claim['found_location'] ?? 'Not specified') ?></span>
+                                    </div>
+                                    <div class="claim-meta-item">
+                                        <i class="fas fa-user"></i>
+                                        <span>Reported by: <?= htmlspecialchars($claim['reporter_name'] ?? 'Anonymous') ?></span>
+                                    </div>
+                                </div>
+                                
+                                <?php if($claim['claimant_description']): ?>
+                                    <div class="mt-2 p-2 bg-light rounded small">
+                                        <i class="fas fa-comment-dots me-1" style="color: #FF8C00;"></i>
+                                        <strong>Your note:</strong> <?= htmlspecialchars(substr($claim['claimant_description'], 0, 100)) ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        
+                        <div class="claim-footer">
+                            <!-- View Item Details - Redirects to item-details.php -->
+                            <a href="<?= $base_url ?>item-details.php?id=<?= $claim['item_id'] ?>" class="btn btn-info btn-action">
+                                <i class="fas fa-box"></i> View Item Details
+                            </a>
+                            
+                            <?php if($claim['status'] == 'pending'): ?>
+                                <button onclick="cancelClaim(<?= $claim['claim_id'] ?>)" class="btn btn-danger btn-action">
+                                    <i class="fas fa-times"></i> Cancel Claim
+                                </button>
+                            <?php endif; ?>
+                            
+                            <?php if($claim['status'] == 'approved'): ?>
+                                <button onclick="completeReclaim(<?= $claim['claim_id'] ?>)" class="btn btn-success btn-action">
+                                    <i class="fas fa-handshake"></i> Confirm Reclaim
+                                </button>
+                            <?php endif; ?>
+                            
+                            <?php if($claim['status'] == 'completed'): ?>
+                                <a href="<?= $base_url ?>item-details.php?id=<?= $claim['item_id'] ?>" class="btn btn-secondary btn-action">
+                                    <i class="fas fa-check-double"></i> View Returned Item
+                                </a>
+                            <?php endif; ?>
+                            
+                            <?php if($claim['status'] == 'rejected'): ?>
+                                <button class="btn btn-secondary btn-action" disabled>
+                                    <i class="fas fa-times-circle"></i> Claim Rejected
+                                </button>
+                            <?php endif; ?>
+                            
+                            <?php if($claim['status'] == 'cancelled'): ?>
+                                <button class="btn btn-secondary btn-action" disabled>
+                                    <i class="fas fa-ban"></i> Claim Cancelled
+                                </button>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     </div>
     </main>
     
-    <script>
-    function viewClaim(claimId) {
-        window.location.href = '<?= $base_url ?>user/claim-details.php?id=' + claimId;
-    }
+    <!-- Cancel Claim Modal -->
+    <div class="modal fade" id="cancelModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header" style="background: #dc3545; color: white;">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle"></i> Cancel Claim Request</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to cancel this claim request?</p>
+                    <p class="text-muted small">This action cannot be undone. You can submit a new claim later if needed.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <form method="POST" action="" style="display: inline;">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="cancel_claim" value="1">
+                        <input type="hidden" name="claim_id" id="cancel_claim_id">
+                        <button type="submit" class="btn btn-danger">Yes, Cancel Claim</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
     
+    <script>
     function completeReclaim(claimId) {
-        if(confirm('Have you received your item? This action cannot be undone.')) {
-            window.location.href = '<?= $base_url ?>user/complete-reclaim.php?id=' + claimId;
+        if (confirm('✅ Have you received your item?\n\nThis action will mark the item as returned and complete the reclaim process. This cannot be undone.')) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '';
+            form.innerHTML = '<?= csrf_field() ?>' +
+                '<input type="hidden" name="complete_claim" value="1">' +
+                '<input type="hidden" name="claim_id" value="' + claimId + '">';
+            document.body.appendChild(form);
+            form.submit();
         }
     }
+    
+    function cancelClaim(claimId) {
+        document.getElementById('cancel_claim_id').value = claimId;
+        const modal = new bootstrap.Modal(document.getElementById('cancelModal'));
+        modal.show();
+    }
+    
+    // Auto-hide alerts after 5 seconds
+    setTimeout(function() {
+        const alerts = document.querySelectorAll('.alert');
+        alerts.forEach(function(alert) {
+            setTimeout(function() {
+                const bsAlert = new bootstrap.Alert(alert);
+                bsAlert.close();
+            }, 5000);
+        });
+    }, 3000);
     </script>
     
     <?php include __DIR__ . '/../includes/footer.php'; ?>

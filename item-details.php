@@ -73,10 +73,7 @@ function formatTimeOnly($dateTime) {
 }
 
 $base_url = '/reclaim-system/';
-
-// For debugging - you can remove this after testing
-$profileImagePath = $item['reporter_profile_image'] ?? '';
-$profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
+$isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
 ?>
 
 <div class="container content-wrapper">
@@ -101,10 +98,10 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
                     
                     <?php if ($hasImage): ?>
                         <div class="image-gallery">
-                            <img src="<?= $imageUrl ?>" class="img-fluid rounded-top" alt="Item image" style="width: 100%; height: 400px; object-fit: cover;">
+                            <img src="<?= $imageUrl ?>" class="img-fluid rounded-top" alt="Item image" style="width: 100%; height: 350px; object-fit: cover;">
                         </div>
                     <?php else: ?>
-                        <div class="bg-light d-flex align-items-center justify-content-center rounded-top" style="height: 400px;">
+                        <div class="bg-light d-flex align-items-center justify-content-center rounded-top" style="height: 350px;">
                             <div class="text-center">
                                 <i class="fas fa-box-open fa-6x" style="color: #FF6B35;"></i>
                                 <p class="mt-3 text-muted">No image available</p>
@@ -143,7 +140,7 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
             </div>
             <?php endif; ?>
             
-            <!-- Similar Items Card -->
+            <!-- Similar Items Card - Horizontal Smaller Cards -->
             <div class="card border-0 shadow-sm mt-4 fade-in">
                 <div class="card-header bg-white border-0 pt-3">
                     <h5 class="mb-0"><i class="fas fa-clone" style="color: #FF6B35;"></i> Similar Items</h5>
@@ -163,34 +160,36 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
                         <p class="text-muted text-center mb-0">No similar items found.</p>
                     <?php else: ?>
                         <?php foreach($similar_items as $similar): ?>
-                            <div class="d-flex align-items-center mb-3 pb-2 border-bottom">
-                                <?php 
-                                $hasSimImage = !empty($similar['image_url']) && imageFileExists($similar['image_url']);
-                                $simImageUrl = $hasSimImage ? getImageUrl($similar['image_url'], $base_url) : '';
-                                ?>
-                                <div class="flex-shrink-0 me-3">
-                                    <?php if($hasSimImage): ?>
-                                        <img src="<?= $simImageUrl ?>" alt="Similar item" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px;">
-                                    <?php else: ?>
-                                        <div class="bg-light d-flex align-items-center justify-content-center" style="width: 60px; height: 60px; border-radius: 8px;">
-                                            <i class="fas fa-box-open fa-2x" style="color: #FF6B35;"></i>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="flex-grow-1">
-                                    <h6 class="mb-1 small fw-bold"><?= htmlspecialchars(substr($similar['title'] ?? $similar['description'], 0, 40)) ?></h6>
-                                    <div class="d-flex justify-content-between align-items-center">
-                                        <span class="badge <?= $similar['status'] == 'lost' ? 'bg-danger' : 'bg-success' ?>">
-                                            <?= ucfirst($similar['status']) ?>
-                                        </span>
-                                        <small class="text-muted">
-                                            <i class="fas fa-clock"></i> <?= timeAgo($similar['reported_date']) ?>
-                                        </small>
+                            <div class="similar-item-horizontal mb-2 pb-2 border-bottom">
+                                <div class="d-flex align-items-center">
+                                    <div class="similar-item-image me-2">
+                                        <?php 
+                                        $hasSimImage = !empty($similar['image_url']) && imageFileExists($similar['image_url']);
+                                        $simImageUrl = $hasSimImage ? getImageUrl($similar['image_url'], $base_url) : '';
+                                        ?>
+                                        <?php if($hasSimImage): ?>
+                                            <img src="<?= $simImageUrl ?>" alt="Similar item">
+                                        <?php else: ?>
+                                            <div class="similar-item-placeholder">
+                                                <i class="fas fa-box-open"></i>
+                                            </div>
+                                        <?php endif; ?>
                                     </div>
+                                    <div class="similar-item-details flex-grow-1">
+                                        <h6 class="similar-item-title mb-1"><?= htmlspecialchars(substr($similar['title'] ?? $similar['description'], 0, 35)) ?></h6>
+                                        <div class="similar-item-meta">
+                                            <span class="badge badge-sm <?= $similar['status'] == 'lost' ? 'bg-danger' : ($similar['status'] == 'returned' ? 'bg-info' : 'bg-success') ?>">
+                                                <?= ucfirst($similar['status']) ?>
+                                            </span>
+                                            <small class="text-muted ms-2">
+                                                <i class="fas fa-clock"></i> <?= timeAgo($similar['reported_date']) ?>
+                                            </small>
+                                        </div>
+                                    </div>
+                                    <a href="<?= $base_url ?>item-details.php?id=<?= $similar['item_id'] ?>" class="btn btn-sm btn-outline-primary ms-2">
+                                        View
+                                    </a>
                                 </div>
-                                <a href="<?= $base_url ?>item-details.php?id=<?= $similar['item_id'] ?>" class="btn btn-sm btn-outline-primary ms-2">
-                                    View
-                                </a>
                             </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -215,8 +214,8 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
             <div class="card border-0 shadow-sm fade-in">
                 <div class="card-body p-4">
                     <div class="d-flex justify-content-between align-items-start mb-3">
-                        <h1 class="h2 mb-0" style="color: #E85D2C;"><?= htmlspecialchars($item['title'] ?? $item['description']) ?></h1>
-                        <span class="badge <?= $item['status'] == 'lost' ? 'bg-danger' : 'bg-success' ?> p-2">
+                        <h1 class="h2 mb-0" style="color: #E85D2C; font-size: 1.8rem;"><?= htmlspecialchars($item['title'] ?? $item['description']) ?></h1>
+                        <span class="badge <?= $item['status'] == 'lost' ? 'bg-danger' : ($item['status'] == 'returned' ? 'bg-info' : 'bg-success') ?> px-3 py-1" style="font-size: 0.7rem;">
                             <i class="fas fa-<?= $item['status'] == 'lost' ? 'times-circle' : 'check-circle' ?> me-1"></i>
                             <?= strtoupper($item['status']) ?>
                         </span>
@@ -246,17 +245,36 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
                             </div>
                         </div>
                         
-                        <!-- Location Found/Lost - ONLY VISIBLE TO ADMINISTRATORS -->
-                        <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && !empty($item['found_location'])): ?>
-                        <div class="col-md-6">
-                            <div class="bg-light rounded p-3">
-                                <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i>
-                                    <?= $item['status'] == 'lost' ? 'Location Lost' : 'Location Found' ?>
-                                </small>
-                                <strong><?= htmlspecialchars($item['found_location']) ?></strong>
-                                <br><small class="text-muted">(Visible to administrators only)</small>
+                        <!-- Location - Only visible to admins for found items, visible to all for lost items -->
+                        <?php if ($item['status'] == 'lost'): ?>
+                            <!-- Lost items: Show location to everyone -->
+                            <?php if (!empty($item['found_location'])): ?>
+                            <div class="col-md-6">
+                                <div class="bg-light rounded p-3">
+                                    <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i> Location Lost</small>
+                                    <strong><?= htmlspecialchars($item['found_location']) ?></strong>
+                                </div>
                             </div>
-                        </div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <!-- Found items: Only show location to admins -->
+                            <?php if ($isAdmin && !empty($item['found_location'])): ?>
+                            <div class="col-md-6">
+                                <div class="bg-light rounded p-3">
+                                    <small class="text-muted d-block"><i class="fas fa-map-marker-alt me-1"></i> Location Found</small>
+                                    <strong><?= htmlspecialchars($item['found_location']) ?></strong>
+                                    <br><small class="text-muted">(Visible to administrators only)</small>
+                                </div>
+                            </div>
+                            <?php elseif (!$isAdmin && $item['status'] == 'found'): ?>
+                            <div class="col-md-6">
+                                <div class="bg-light rounded p-3">
+                                    <small class="text-muted d-block"><i class="fas fa-lock me-1"></i> Location Found</small>
+                                    <strong><span class="text-muted">Location is private</span></strong>
+                                    <br><small class="text-muted">Only visible to administrators for security</small>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                         <?php endif; ?>
                         
                         <!-- Keep At / Collection Point (Only for Found Items - visible to everyone) -->
@@ -337,10 +355,10 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
                     
                     <!-- Description Section -->
                     <div class="mb-4">
-                        <h5 class="border-bottom pb-2" style="border-color: #FF6B35 !important;">
+                        <h5 class="border-bottom pb-2" style="border-color: #FF6B35 !important; font-size: 1.1rem;">
                             <i class="fas fa-align-left" style="color: #FF6B35;"></i> Detailed Description
                         </h5>
-                        <div class="mt-3">
+                        <div class="mt-3" style="font-size: 0.85rem;">
                             <?= nl2br(htmlspecialchars($item['description'] ?? 'No description provided')) ?>
                         </div>
                     </div>
@@ -412,8 +430,8 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
                                     <strong><?= formatDateTime($item['date_found']) ?></strong>
                                     <span class="text-muted">(<?= timeAgo($item['date_found']) ?>)</span>
                                 </p>
-                                <!-- Location in timeline - ONLY VISIBLE TO ADMINISTRATORS -->
-                                <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin' && $item['status'] == 'lost' && !empty($item['found_location'])): ?>
+                                <!-- Location in timeline - ONLY VISIBLE TO ADMINISTRATORS for found items -->
+                                <?php if ($isAdmin && $item['status'] == 'lost' && !empty($item['found_location'])): ?>
                                     <small class="text-muted">Location: <?= htmlspecialchars($item['found_location']) ?></small>
                                 <?php endif; ?>
                                 <?php if ($item['status'] == 'found' && !empty($item['delivery_location'])): ?>
@@ -455,8 +473,76 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
     </div>
 </div>
 
-<!-- Timeline CSS -->
+<!-- Additional CSS for Similar Items Horizontal Cards -->
 <style>
+    /* Similar Items Horizontal Card Styles */
+    .similar-item-horizontal {
+        transition: all 0.2s ease;
+    }
+    
+    .similar-item-horizontal:hover {
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        padding-left: 5px;
+    }
+    
+    .similar-item-image {
+        width: 45px;
+        height: 45px;
+        flex-shrink: 0;
+    }
+    
+    .similar-item-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 8px;
+    }
+    
+    .similar-item-placeholder {
+        width: 45px;
+        height: 45px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #FF8C00;
+    }
+    
+    .similar-item-placeholder i {
+        font-size: 20px;
+    }
+    
+    .similar-item-title {
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 3px;
+        color: #2C3E50;
+        line-height: 1.3;
+    }
+    
+    .similar-item-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    
+    .similar-item-meta .badge {
+        font-size: 0.65rem;
+        padding: 2px 8px;
+    }
+    
+    .similar-item-meta small {
+        font-size: 0.65rem;
+    }
+    
+    .badge-sm {
+        font-size: 0.7rem;
+        padding: 3px 10px;
+    }
+    
+    /* Timeline Styles */
     .timeline {
         position: relative;
         padding-left: 30px;
@@ -486,14 +572,18 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
     .timeline-icon {
         position: absolute;
         left: -30px;
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
         color: white;
         z-index: 1;
+    }
+    
+    .timeline-icon i {
+        font-size: 12px;
     }
     
     .timeline-icon.bg-danger { background: #dc3545; }
@@ -504,18 +594,47 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
     .timeline-content {
         flex: 1;
         padding-left: 20px;
-        padding-bottom: 10px;
+        padding-bottom: 8px;
     }
     
     .timeline-content h6 {
-        margin-bottom: 5px;
+        margin-bottom: 3px;
         font-weight: 700;
+        font-size: 0.85rem;
         color: #2C3E50;
     }
     
     .timeline-content p {
-        margin-bottom: 5px;
+        margin-bottom: 3px;
+        font-size: 0.75rem;
     }
+    
+    .timeline-content small {
+        font-size: 0.65rem;
+    }
+
+    .action-buttons .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        text-align: center;
+    }
+
+    .action-buttons .btn i {
+        line-height: 1;
+    }
+    
+    .required-field::after { content: '*'; color: red; margin-left: 4px; }
+    .image-gallery { position: relative; overflow: hidden; border-radius: 10px 10px 0 0; }
+    .fade-in { animation: fadeIn 0.5s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .card { transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { box-shadow: 0 10px 30px rgba(0,0,0,0.1) !important; }
+    .btn-primary { background: linear-gradient(135deg, #FF6B35, #E85D2C); border: none; transition: transform 0.2s; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(255, 107, 53, 0.3); }
+    .bg-light { background-color: #f8f9fa !important; }
+    .alert-info { background-color: #e3f2fd; border-color: #b3e5fc; color: #01579b; }
 </style>
 
 <!-- Claim Modal -->
@@ -562,19 +681,6 @@ $profileImageUrl = getReporterProfileImageUrl($profileImagePath, $base_url);
         </div>
     </div>
 </div>
-
-<style>
-    .required-field::after { content: '*'; color: red; margin-left: 4px; }
-    .image-gallery { position: relative; overflow: hidden; border-radius: 10px 10px 0 0; }
-    .fade-in { animation: fadeIn 0.5s ease-in; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    .card { transition: transform 0.2s, box-shadow 0.2s; }
-    .card:hover { box-shadow: 0 10px 30px rgba(0,0,0,0.1) !important; }
-    .btn-primary { background: linear-gradient(135deg, #FF6B35, #E85D2C); border: none; transition: transform 0.2s; }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(255, 107, 53, 0.3); }
-    .bg-light { background-color: #f8f9fa !important; }
-    .alert-info { background-color: #e3f2fd; border-color: #b3e5fc; color: #01579b; }
-</style>
 
 <script>
 function openClaimModal(itemId) {

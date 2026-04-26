@@ -141,14 +141,42 @@ if ($image_analysis_id > 0) {
     .item-card:hover {
         transform: translateY(-5px);
     }
+
+    .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: 60px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    text-align: center;
+    font-size: 0.75rem !important;
+    font-weight: 500;
+    line-height: 1.2;
+    color: white;
+    }
+    
     .badge-lost { background-color: #dc3545; }
     .badge-found { background-color: #28a745; }
     .badge-returned { background-color: #17a2b8; }
     .status-badge {
-        padding: 5px 10px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: bold;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        min-width: 88px;
+        min-height: 30px;
+        padding: 0 12px;
+        border-radius: 999px;
+        box-sizing: border-box;
+        white-space: nowrap;
+        text-align: center;
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1;
+        color: #1A252F;
     }
     .item-card-image,
     .item-card-placeholder {
@@ -422,7 +450,7 @@ if ($image_analysis_id > 0) {
                                             </span>
                                         </div>
                                         <p class="card-text small text-muted mb-2">
-                                            <i class="fas fa-map-marker-alt"></i> <?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?><br>
+                                            <?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?><br>
                                             <i class="fas fa-tag"></i> <?= htmlspecialchars($item['category'] ?? 'N/A') ?><br>
                                             <?php if(!empty($item['date_found'])): ?>
                                                 <i class="fas fa-calendar"></i> <?= date('M d, Y', strtotime($item['date_found'])) ?>

@@ -218,24 +218,22 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             align-items: flex-start !important;
             width: 100%;
         }
-        .item-card .card-title {
-            flex: 1;
-            word-break: break-word;
-            padding-right: 10px;
-            margin-bottom: 0;
-            font-size: 0.9rem;
-            font-weight: 600;
-            line-height: 1.4;
-        }
         .status-badge {
-            flex-shrink: 0;
-            white-space: nowrap;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: bold;
-            color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        min-width: 60px;
+        padding: 3px 8px;
+        border-radius: 20px;
+        white-space: nowrap;
+        text-align: center;
+        font-size: 0.75rem !important;
+        font-weight: 500;
+        line-height: 1.2;
+        color: white;
         }
+
         .badge-lost { background-color: #dc3545; }
         .badge-found { background-color: #28a745; }
         .badge-returned { background-color: #17a2b8; }
@@ -277,6 +275,18 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         .alert-sm {
             padding: 5px 10px;
             font-size: 11px;
+        }
+        .content-wrapper .btn,
+        .modal .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-align: center;
+        }
+        .content-wrapper .btn i,
+        .modal .btn i {
+            line-height: 1;
         }
     </style>
 </head>
@@ -408,7 +418,6 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             
                             <div class="item-meta">
                                 <div class="item-meta-row">
-                                    <i class="fas fa-map-marker-alt"></i>
                                     <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?></span>
                                 </div>
                                 <div class="item-meta-row">

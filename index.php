@@ -17,7 +17,6 @@ if (isset($_SESSION['delete_error'])) {
 }
 
 require_once 'config/database.php';
-require_once 'includes/header.php';
 require_once 'includes/functions.php';
 
 $db = Database::getInstance()->getConnection();
@@ -47,6 +46,9 @@ $stmt->execute();
 $recent_claims = $stmt->fetchAll();
 
 $base_url = '/reclaim-system/';
+
+// Include header AFTER all PHP processing (no output before this point)
+require_once 'includes/header.php';
 ?>
 
 <style>
@@ -258,28 +260,36 @@ $base_url = '/reclaim-system/';
         padding-right: 10px;
         margin-bottom: 0;
         font-size: 0.9rem;
-        font-weight: 600;
+        font-weight: 800;
         line-height: 1.4;
     }
     .status-badge {
-        flex-shrink: 0;
-        white-space: nowrap;
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: bold;
-        color: white;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: 35px;
+    padding: 1px 3px;
+    border-radius: 8px;
+    white-space: nowrap;
+    text-align: center;
+    font-size: 0.75rem !important;
+    font-weight: 500;
+    line-height: 1.2;
+    color: white;
     }
+
     .badge-lost { background-color: #dc3545; }
     .badge-found { background-color: #28a745; }
     .badge-returned { background-color: #17a2b8; }
+    
     .item-meta {
         margin-top: 10px;
     }
-    .item-meta-row {
-        display: flex;
-        align-items: center;
-        margin-bottom: 6px;
+    .item-meta-row span {
+    font-size: 12px;
+    color: #6c757d;
+    font-weight: 700;
     }
     .item-meta-row i {
         width: 18px;
@@ -561,7 +571,6 @@ $base_url = '/reclaim-system/';
                                 </div>
                                 <div class="item-meta">
                                     <div class="item-meta-row">
-                                        <i class="fas fa-map-marker-alt"></i>
                                         <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'Not specified') ?></span>
                                     </div>
                                     <div class="item-meta-row">

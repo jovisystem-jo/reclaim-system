@@ -60,17 +60,11 @@ $base_url = '/reclaim-system/';
         }
 
         .content-wrapper {
-    margin-top: 20px; /* adjust: 20px–40px */
-}
+            margin-top: 20px; /* adjust: 20px–40px */
+        }
         .report-card i {
             font-size: 48px;
             margin-bottom: 15px;
-        }
-        .report-card .report-icon-lost {
-            color: #dc3545;
-        }
-        .report-card .report-icon-found {
-            color: #28a745;
         }
         .report-card h3 {
             margin-bottom: 15px;
@@ -116,15 +110,6 @@ $base_url = '/reclaim-system/';
             font-size: 36px;
             color: #FF8C00;
             margin-bottom: 10px;
-        }
-        .stat-card .stat-icon-reports {
-            color: #ff8c00;
-        }
-        .stat-card .stat-icon-claims {
-            color: #f39c12;
-        }
-        .stat-card .stat-icon-approved {
-            color: #27ae60;
         }
         .stat-card h3 {
             font-size: 28px;
@@ -192,6 +177,23 @@ $base_url = '/reclaim-system/';
             font-weight: bold;
             color: white;
         }
+
+        .status-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        min-width: 60px;
+        padding: 3px 8px;
+        border-radius: 20px;
+        white-space: nowrap;
+        text-align: center;
+        font-size: 0.75rem !important;
+        font-weight: 500;
+        line-height: 1.2;
+        color: white;
+        }
+
         .badge-lost { background-color: #dc3545; }
         .badge-found { background-color: #28a745; }
         .badge-returned { background-color: #17a2b8; }
@@ -329,7 +331,7 @@ $base_url = '/reclaim-system/';
         <div class="row mb-5">
             <div class="col-md-6">
                 <div class="report-card">
-                    <i class="fas fa-frown report-icon-lost"></i>
+                    <i class="fas fa-frown"></i>
                     <h3>I Lost an Item</h3>
                     <p>Report a lost item and get help finding it</p>
                     <a href="<?= $base_url ?>user/report-item.php?type=lost" class="btn btn-report">
@@ -339,7 +341,7 @@ $base_url = '/reclaim-system/';
             </div>
             <div class="col-md-6">
                 <div class="report-card">
-                    <i class="fas fa-smile report-icon-found"></i>
+                    <i class="fas fa-smile"></i>
                     <h3>I Found an Item</h3>
                     <p>Report a found item and help someone reclaim it</p>
                     <a href="<?= $base_url ?>user/report-item.php?type=found" class="btn btn-report">
@@ -352,23 +354,23 @@ $base_url = '/reclaim-system/';
         <!-- Statistics Section -->
         <h4 class="section-title"><i class="fas fa-chart-line"></i> Your Activity Statistics</h4>
         <div class="row mb-5">
-                <div class="col-md-4 mb-3">
+            <div class="col-md-4 mb-3">
                 <div class="stat-card">
-                    <i class="fas fa-clipboard-list stat-icon-reports"></i>
+                    <i class="fas fa-clipboard-list"></i>
                     <h3><?= $stats['my_reports'] ?></h3>
                     <p>Items Reported</p>
                 </div>
             </div>
             <div class="col-md-4 mb-3">
                 <div class="stat-card">
-                    <i class="fas fa-hand-paper stat-icon-claims"></i>
+                    <i class="fas fa-hand-paper"></i>
                     <h3><?= $stats['my_claims'] ?></h3>
                     <p>Claims Submitted</p>
                 </div>
             </div>
             <div class="col-md-4 mb-3">
                 <div class="stat-card">
-                    <i class="fas fa-check-circle stat-icon-approved"></i>
+                    <i class="fas fa-check-circle"></i>
                     <h3><?= $stats['approved_claims'] ?></h3>
                     <p>Approved Claims</p>
                 </div>
@@ -409,7 +411,6 @@ $base_url = '/reclaim-system/';
                             </div>
                             <div class="item-meta">
                                 <div class="item-meta-row">
-                                    <i class="fas fa-map-marker-alt"></i>
                                     <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?></span>
                                 </div>
                                 <div class="item-meta-row">
