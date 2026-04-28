@@ -366,7 +366,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                         <h4><i class="fas <?= $type === 'lost' ? 'fa-frown' : 'fa-smile' ?> me-2"></i> 
                             <?= $type === 'lost' ? 'Report Lost Item' : 'Report Found Item' ?>
                         </h4>
-                        <p class="mb-0 opacity-75">Please provide detailed information to help us reunite items with their owners</p>
+                        <p class="mb-0 text-white">Please provide detailed information to help us reunite items with their owners</p>
                     </div>
                     <div class="card-body">
                         <?php if($error): ?>

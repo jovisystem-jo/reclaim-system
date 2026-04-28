@@ -12,6 +12,18 @@ if (isset($_SESSION['userID'])) {
 
 $error = '';
 $success = '';
+$redirect = trim($_GET['redirect'] ?? '');
+
+if ($redirect !== '') {
+    $redirect = ltrim($redirect, '/');
+    if (
+        preg_match('/^(https?:|\/\/)/i', $redirect) ||
+        str_contains($redirect, '..') ||
+        !preg_match('/^[A-Za-z0-9_\/.-]+\.php(\?.*)?$/', $redirect)
+    ) {
+        $redirect = '';
+    }
+}
 
 // Department options
 $departments = [
@@ -142,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body class="auth-page">
     <main class="auth-shell">
-        <div class="container">
+        <div class="container content-wrapper">
             <div class="row justify-content-center">
                 <div class="col-lg-8 col-md-10">
                 <div class="card fade-in auth-card">
@@ -245,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </form>
                         
                         <div class="text-center mt-3">
-                            <p>Already have an account? <a href="login.php">Login here</a></p>
+                            <p>Already have an account? <a href="login.php<?= $redirect !== '' ? '?redirect=' . urlencode($redirect) : '' ?>">Login here</a></p>
                         </div>
                     </div>
                 </div>

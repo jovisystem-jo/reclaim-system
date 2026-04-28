@@ -392,7 +392,7 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
                                 <i class="fas fa-sign-in-alt me-2"></i>
                                 Please login to claim this item.
                             </div>
-                            <a href="<?= $base_url ?>login.php?redirect=item-details.php?id=<?= $item['item_id'] ?>" class="btn btn-primary btn-lg w-100">
+                            <a href="<?= $base_url ?>login.php?redirect=<?= urlencode('item-details.php?id=' . $item['item_id']) ?>" class="btn btn-primary btn-lg w-100">
                                 <i class="fas fa-sign-in-alt"></i> Login to Claim
                             </a>
                         <?php endif; ?>

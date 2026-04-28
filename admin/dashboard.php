@@ -181,6 +181,10 @@ $base_url = '/reclaim-system/';
             margin-bottom: 5px;
         }
         
+        .welcome-banner p {
+            color: #FFFFFF;
+        }
+        
         .status-badge {
             padding: 5px 12px;
             border-radius: 50px;
@@ -189,6 +193,8 @@ $base_url = '/reclaim-system/';
         }
         .status-lost { background: #dc3545; color: white; }
         .status-found { background: #28a745; color: white; }
+        .status-returned { background: #17a2b8; color: white; }
+        .status-resolved { background: #6c757d; color: white; }
         .status-pending { background: #ffc107; color: #333; }
         .status-approved { background: #28a745; color: white; }
         .status-rejected { background: #dc3545; color: white; }
@@ -320,7 +326,7 @@ $base_url = '/reclaim-system/';
                                                 <tr>
                                                     <td><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 30)) ?></td>
                                                     <td>
-                                                        <span class="status-badge <?= $item['status'] == 'lost' ? 'status-lost' : 'status-found' ?>">
+                                                        <span class="status-badge <?= $item['status'] == 'lost' ? 'status-lost' : ($item['status'] == 'returned' ? 'status-returned' : ($item['status'] == 'resolved' ? 'status-resolved' : 'status-found')) ?>">
                                                             <?= ucfirst($item['status']) ?>
                                                         </span>
                                                     </td>

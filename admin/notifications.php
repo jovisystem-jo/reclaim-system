@@ -252,6 +252,12 @@ $base_url = '/reclaim-system/';
         .filter-btn {
             margin-right: 10px;
             border-radius: 50px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 38px;
+            line-height: 1;
+            text-align: center;
         }
         
         .filter-btn.active {

@@ -155,11 +155,15 @@ $base_url = '/reclaim-system/';
         .card-header-custom h4 {
             margin: 0;
             font-weight: 700;
+            font-size: 1.35rem;
+            line-height: 1.3;
         }
         .card-header-custom p {
-            margin: 5px 0 0;
+            margin: 6px 0 0;
             opacity: 0.9;
-            font-size: 14px;
+            color: #fff;
+            font-size: 0.95rem;
+            line-height: 1.5;
         }
         .card-body-custom {
             padding: 30px;
@@ -236,7 +240,7 @@ $base_url = '/reclaim-system/';
             
             <div class="col-md-10 main-content content-wrapper">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2 class="fw-bold"><i class="fas fa-signature me-2" style="color: #FF6B35;"></i> Admin Signature Settings</h2>
+                    <h2 class="fw-bold page-title"><i class="fas fa-signature me-2" style="color: #FF6B35;"></i> Admin Signature Settings</h2>
                     <a href="verify-claims.php" class="btn btn-secondary-custom">
                         <i class="fas fa-arrow-left me-2"></i> Back to Verify Claims
                     </a>

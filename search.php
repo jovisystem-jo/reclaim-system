@@ -7,6 +7,7 @@ $db = Database::getInstance()->getConnection();
 $search_results = [];
 $search_query = '';
 $total_results = 0;
+$visible_statuses = ['lost', 'found'];
 
 // Get filter values
 $search_query = $_GET['query'] ?? '';
@@ -18,8 +19,12 @@ $date_to = $_GET['date_to'] ?? '';
 $item_title = $_GET['item_title'] ?? '';
 $image_analysis_id = isset($_GET['image_analysis']) ? (int)$_GET['image_analysis'] : 0;
 
+if (!in_array($status, $visible_statuses, true)) {
+    $status = '';
+}
+
 // Build the search query dynamically
-$sql = "SELECT * FROM items WHERE 1=1";
+$sql = "SELECT * FROM items WHERE status IN ('lost', 'found')";
 $params = [];
 
 // Handle image search results
@@ -111,11 +116,11 @@ if (isset($_SESSION['userID']) && !empty($search_query) && $image_analysis_id ==
 $base_url = '/reclaim-system/';
 
 // Get categories for filter dropdown
-$cat_stmt = $db->query("SELECT DISTINCT category FROM items WHERE category IS NOT NULL AND category != '' ORDER BY category");
+$cat_stmt = $db->query("SELECT DISTINCT category FROM items WHERE status IN ('lost', 'found') AND category IS NOT NULL AND category != '' ORDER BY category");
 $categories = $cat_stmt->fetchAll();
 
 // Get locations for filter dropdown
-$loc_stmt = $db->query("SELECT DISTINCT found_location FROM items WHERE found_location IS NOT NULL AND found_location != '' ORDER BY found_location LIMIT 20");
+$loc_stmt = $db->query("SELECT DISTINCT found_location FROM items WHERE status IN ('lost', 'found') AND found_location IS NOT NULL AND found_location != '' ORDER BY found_location LIMIT 20");
 $locations = $loc_stmt->fetchAll();
 
 // Get image analysis data if available

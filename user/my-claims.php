@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_claim'])) {
         $stmt = $db->prepare("UPDATE claim_requests SET status = 'completed' WHERE claim_id = ?");
         $stmt->execute([$claim_id]);
         
-        $_SESSION['success_message'] = "Item successfully reclaimed! Thank you for confirming.";
+        $_SESSION['success_message'] = "Item successfully reclaimed! Thank you for confirming. You can now view the claim report.";
     } else {
         $_SESSION['error_message'] = "Unable to complete reclaim. Please contact support.";
     }
@@ -253,20 +253,33 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         .badge-completed { background-color: #17a2b8; color: white; }
         .badge-cancelled { background-color: #6c757d; color: white; }
         
+        .claims-btn,
         .btn-action {
-            padding: 6px 15px;
-            font-size: 13px;
-            border-radius: 8px;
-        }
-
-        .content-wrapper .btn,
-        .modal .btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            gap: 8px;
             text-align: center;
+            line-height: 1.2;
+            font-weight: 600;
+            border-radius: 10px;
         }
-
+        .claims-btn {
+            min-height: 42px;
+            padding: 0 18px;
+            font-size: 0.85rem;
+        }
+        .claims-btn-search {
+            min-height: 38px;
+            padding: 0 16px;
+            font-size: 0.82rem;
+        }
+        .btn-action {
+            min-height: 38px;
+            min-width: 168px;
+            padding: 0 16px;
+            font-size: 0.82rem;
+        }
         .content-wrapper .btn i,
         .modal .btn i {
             line-height: 1;
@@ -277,7 +290,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             text-align: center;
             padding: 60px 20px;
         }
-        .empty-state i {
+        .empty-state-icon {
             font-size: 80px;
             color: #dee2e6;
             margin-bottom: 20px;
@@ -289,6 +302,28 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         .empty-state p {
             color: #6c757d;
             margin-bottom: 20px;
+        }
+        
+        /* Complete Reclaim Modal */
+        .complete-modal-header {
+            background: linear-gradient(135deg, #27AE60, #1e8449);
+            color: white;
+        }
+        .complete-modal-body {
+            padding: 20px;
+        }
+        .reminder-list {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .reminder-list ul {
+            margin: 10px 0 0 20px;
+        }
+        .reminder-list li {
+            margin-bottom: 8px;
+            font-size: 14px;
         }
         
         @media (max-width: 768px) {
@@ -303,6 +338,10 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             .claim-footer {
                 justify-content: center;
             }
+            .claim-footer .btn-action {
+                width: 100%;
+                min-width: 0;
+            }
         }
     </style>
 </head>
@@ -314,7 +353,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         <!-- Page Header -->
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="fas fa-file-alt" style="color: #FF8C00;"></i> My Claim Requests</h2>
-            <a href="<?= $base_url ?>search.php" class="btn btn-primary">
+            <a href="<?= $base_url ?>search.php" class="btn btn-primary claims-btn claims-btn-search">
                 <i class="fas fa-search"></i> Search Items
             </a>
         </div>
@@ -386,10 +425,10 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         <?php if(empty($claims)): ?>
             <div class="card fade-in">
                 <div class="empty-state">
-                    <i class="fas fa-inbox"></i>
+                    <i class="fas fa-inbox empty-state-icon"></i>
                     <h4>No claims submitted yet</h4>
                     <p>Search for lost or found items and submit a claim to get started.</p>
-                    <a href="<?= $base_url ?>search.php" class="btn btn-primary btn-lg">
+                    <a href="<?= $base_url ?>search.php" class="btn btn-primary claims-btn claims-btn-search">
                         <i class="fas fa-search me-2"></i> Search for Items
                     </a>
                 </div>
@@ -462,19 +501,26 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                         </div>
                         
                         <div class="claim-footer">
-                            <!-- View Item Details - Redirects to item-details.php -->
+                            <!-- View Item Details -->
                             <a href="<?= $base_url ?>item-details.php?id=<?= $claim['item_id'] ?>" class="btn btn-info btn-action">
                                 <i class="fas fa-box"></i> View Item Details
                             </a>
                             
+                            <!-- View Claim Report - For Approved and Completed claims -->
+                            <?php if($claim['status'] == 'approved' || $claim['status'] == 'completed'): ?>
+                                <a href="<?= $base_url ?>admin/view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary btn-action" target="_blank">
+                                    <i class="fas fa-file-pdf"></i> View Claim Report
+                                </a>
+                            <?php endif; ?>
+                            
                             <?php if($claim['status'] == 'pending'): ?>
-                                <button onclick="cancelClaim(<?= $claim['claim_id'] ?>)" class="btn btn-danger btn-action">
+                                <button onclick="openCancelModal(<?= $claim['claim_id'] ?>)" class="btn btn-danger btn-action">
                                     <i class="fas fa-times"></i> Cancel Claim
                                 </button>
                             <?php endif; ?>
                             
                             <?php if($claim['status'] == 'approved'): ?>
-                                <button onclick="completeReclaim(<?= $claim['claim_id'] ?>)" class="btn btn-success btn-action">
+                                <button onclick="openCompleteModal(<?= $claim['claim_id'] ?>)" class="btn btn-success btn-action">
                                     <i class="fas fa-handshake"></i> Confirm Reclaim
                                 </button>
                             <?php endif; ?>
@@ -505,9 +551,49 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     </div>
     </main>
     
+    <!-- Complete Reclaim Modal with Reminder -->
+    <div class="modal fade" id="completeModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header complete-modal-header">
+                    <h5 class="modal-title"><i class="fas fa-handshake me-2"></i> Confirm Reclaim</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="complete-modal-body">
+                    <div class="text-center mb-3">
+                        <i class="fas fa-check-circle fa-4x" style="color: #27AE60;"></i>
+                    </div>
+                    <p class="text-center mb-3"><strong>Have you received your item?</strong></p>
+                    
+                    <div class="reminder-list">
+                        <p><i class="fas fa-info-circle me-2" style="color: #FF6B35;"></i> <strong>Important Reminders:</strong></p>
+                        <ul>
+                            <li>✓ After confirmation, your claim will be marked as <strong>COMPLETED</strong></li>
+                            <li>✓ You will receive a notification confirming the successful reclaim</li>
+                            <li>✓ The item status will be updated to <strong>RETURNED</strong></li>
+                            <li>✓ You can still <strong>view the claim report</strong> anytime after confirmation</li>
+                            <li>✓ This action <strong>cannot be undone</strong></li>
+                        </ul>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-file-pdf me-2"></i>
+                        <strong>Note:</strong> After confirming, you can still access the Claim Report from your claims list.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary claims-btn" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success claims-btn" id="confirmCompleteBtn">
+                        <i class="fas fa-check me-2"></i> Yes, I have received the item
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <!-- Cancel Claim Modal -->
     <div class="modal fade" id="cancelModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header" style="background: #dc3545; color: white;">
                     <h5 class="modal-title"><i class="fas fa-exclamation-triangle"></i> Cancel Claim Request</h5>
@@ -518,12 +604,12 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                     <p class="text-muted small">This action cannot be undone. You can submit a new claim later if needed.</p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-secondary claims-btn" data-bs-dismiss="modal">Close</button>
                     <form method="POST" action="" style="display: inline;">
                         <?= csrf_field() ?>
                         <input type="hidden" name="cancel_claim" value="1">
                         <input type="hidden" name="claim_id" id="cancel_claim_id">
-                        <button type="submit" class="btn btn-danger">Yes, Cancel Claim</button>
+                        <button type="submit" class="btn btn-danger claims-btn">Yes, Cancel Claim</button>
                     </form>
                 </div>
             </div>
@@ -531,24 +617,32 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     </div>
     
     <script>
-    function completeReclaim(claimId) {
-        if (confirm('✅ Have you received your item?\n\nThis action will mark the item as returned and complete the reclaim process. This cannot be undone.')) {
+    let currentClaimId = null;
+    
+    function openCompleteModal(claimId) {
+        currentClaimId = claimId;
+        const modal = new bootstrap.Modal(document.getElementById('completeModal'));
+        modal.show();
+    }
+    
+    function openCancelModal(claimId) {
+        document.getElementById('cancel_claim_id').value = claimId;
+        const modal = new bootstrap.Modal(document.getElementById('cancelModal'));
+        modal.show();
+    }
+    
+    document.getElementById('confirmCompleteBtn').addEventListener('click', function() {
+        if (currentClaimId) {
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = '';
             form.innerHTML = '<?= csrf_field() ?>' +
                 '<input type="hidden" name="complete_claim" value="1">' +
-                '<input type="hidden" name="claim_id" value="' + claimId + '">';
+                '<input type="hidden" name="claim_id" value="' + currentClaimId + '">';
             document.body.appendChild(form);
             form.submit();
         }
-    }
-    
-    function cancelClaim(claimId) {
-        document.getElementById('cancel_claim_id').value = claimId;
-        const modal = new bootstrap.Modal(document.getElementById('cancelModal'));
-        modal.show();
-    }
+    });
     
     // Auto-hide alerts after 5 seconds
     setTimeout(function() {
@@ -556,7 +650,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         alerts.forEach(function(alert) {
             setTimeout(function() {
                 const bsAlert = new bootstrap.Alert(alert);
-                bsAlert.close();
+                if (bsAlert) bsAlert.close();
             }, 5000);
         });
     }, 3000);

@@ -16,6 +16,18 @@ if (isset($_SESSION['userID'])) {
 }
 
 $error = '';
+$redirect = trim($_GET['redirect'] ?? '');
+
+if ($redirect !== '') {
+    $redirect = ltrim($redirect, '/');
+    if (
+        preg_match('/^(https?:|\/\/)/i', $redirect) ||
+        str_contains($redirect, '..') ||
+        !preg_match('/^[A-Za-z0-9_\/.-]+\.php(\?.*)?$/', $redirect)
+    ) {
+        $redirect = '';
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf_token();
@@ -49,7 +61,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 // Redirect based on role
-                if ($user['role'] === 'admin') {
+                if ($redirect !== '') {
+                    header('Location: ' . $redirect);
+                } elseif ($user['role'] === 'admin') {
                     header('Location: admin/dashboard.php');
                 } else {
                     header('Location: user/dashboard.php');
@@ -86,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body class="auth-page">
     <main class="auth-shell">
-        <div class="container">
+        <div class="container content-wrapper">
             <div class="row justify-content-center">
                 <div class="col-lg-5 col-md-7">
                 <div class="card fade-in auth-card">
@@ -123,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </form>
                         
                         <div class="text-center mt-3">
-                            <p>Don't have an account? <a href="register.php">Register here</a></p>
+                            <p>Don't have an account? <a href="register.php<?= $redirect !== '' ? '?redirect=' . urlencode($redirect) : '' ?>">Register here</a></p>
                         </div>
                         <div class="text-center mt-3">
                             <a href="index.php">Back to Home</a>

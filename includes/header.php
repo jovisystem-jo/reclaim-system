@@ -70,6 +70,12 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
 $embedded_layout = defined('RECLAIM_EMBEDDED_LAYOUT') && RECLAIM_EMBEDDED_LAYOUT;
 $page_slug = preg_replace('/\.php$/', '', $current_page);
 $section_slug = ($current_dir === '.' || $current_dir === '\\') ? 'public' : $current_dir;
+$is_admin_user = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
+$notification_page = $base_url . ($is_admin_user ? 'admin/notifications.php' : 'user/notifications.php');
+$dashboard_page = $base_url . ($is_admin_user ? 'admin/dashboard.php' : 'user/dashboard.php');
+$profile_page = $base_url . ($is_admin_user ? 'admin/profile.php' : 'user/user-profile.php');
+$reports_page = $base_url . ($is_admin_user ? 'admin/reports.php' : 'user/my-report-item.php');
+$claims_page = $base_url . ($is_admin_user ? 'admin/verify-claims.php' : 'user/my-claims.php');
 $body_classes = implode(' ', [
     'app-page',
     'section-' . preg_replace('/[^a-z0-9\-]/i', '-', strtolower($section_slug)),
@@ -284,13 +290,13 @@ $body_classes = implode(' ', [
                         <a class="nav-link <?= $current_page === 'search.php' ? 'active' : '' ?>" href="<?= $base_url ?>search.php">Search</a>
                     </li>
                     <?php if(isset($_SESSION['userID'])): ?>
-                        <?php if($_SESSION['role'] == 'admin'): ?>
+                        <?php if($is_admin_user): ?>
                             <li class="nav-item">
-                                <a class="nav-link <?= $current_dir === 'admin' ? 'active' : '' ?>" href="<?= $base_url ?>admin/dashboard.php">Admin Panel</a>
+                                <a class="nav-link <?= $current_dir === 'admin' ? 'active' : '' ?>" href="<?= $dashboard_page ?>">Admin Panel</a>
                             </li>
                         <?php else: ?>
                             <li class="nav-item">
-                                <a class="nav-link <?= $current_dir === 'user' ? 'active' : '' ?>" href="<?= $base_url ?>user/dashboard.php">Dashboard</a>
+                                <a class="nav-link <?= $current_dir === 'user' ? 'active' : '' ?>" href="<?= $dashboard_page ?>">Dashboard</a>
                             </li>
                         <?php endif; ?>
                         
@@ -343,7 +349,7 @@ $body_classes = implode(' ', [
                                 
                                 <!-- View All Notifications Button - ALWAYS SHOWN -->
                                 <div class="notification-footer">
-                                    <a href="<?= $base_url ?>user/notifications.php">
+                                    <a href="<?= $notification_page ?>">
                                         <i class="fas fa-bell me-1"></i> View all notifications
                                         <?php if($unread_count > 0): ?>
                                             <span class="badge bg-danger ms-1" style="font-size: 10px;"><?= $unread_count ?> new</span>
@@ -354,14 +360,20 @@ $body_classes = implode(' ', [
                         </li>
                         
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle <?= $current_dir === 'user' ? 'active' : '' ?>" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <a class="nav-link dropdown-toggle <?= in_array($current_dir, ['user', 'admin'], true) ? 'active' : '' ?>" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="fas fa-user-circle"></i> <?= htmlspecialchars($_SESSION['name']) ?>
                             </a>
                             <ul class="dropdown-menu" aria-labelledby="userDropdown">
-                                <li><a class="dropdown-item" href="<?= $base_url ?>user/user-profile.php"><i class="fas fa-user"></i> Profile</a></li>
-                                <li><a class="dropdown-item" href="<?= $base_url ?>user/my-claims.php"><i class="fas fa-file-alt"></i> My Claims</a></li>
-                                <li><a class="dropdown-item" href="<?= $base_url ?>user/my-report-item.php"><i class="fas fa-clipboard-list"></i> My Reports</a></li>
-                                <li><a class="dropdown-item" href="<?= $base_url ?>user/notifications.php"><i class="fas fa-bell"></i> Notifications</a></li>
+                                <li><a class="dropdown-item" href="<?= $profile_page ?>"><i class="fas fa-user"></i> Profile</a></li>
+                                <li><a class="dropdown-item" href="<?= $notification_page ?>"><i class="fas fa-bell"></i> Notifications</a></li>
+                                <?php if($is_admin_user): ?>
+                                    <li><a class="dropdown-item" href="<?= $dashboard_page ?>"><i class="fas fa-tachometer-alt"></i> Admin Dashboard</a></li>
+                                    <li><a class="dropdown-item" href="<?= $claims_page ?>"><i class="fas fa-check-double"></i> Verify Claims</a></li>
+                                    <li><a class="dropdown-item" href="<?= $reports_page ?>"><i class="fas fa-chart-bar"></i> Reports</a></li>
+                                <?php else: ?>
+                                    <li><a class="dropdown-item" href="<?= $claims_page ?>"><i class="fas fa-file-alt"></i> My Claims</a></li>
+                                    <li><a class="dropdown-item" href="<?= $reports_page ?>"><i class="fas fa-clipboard-list"></i> My Reports</a></li>
+                                <?php endif; ?>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item" href="<?= $base_url ?>logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
                             </ul>
@@ -395,11 +407,11 @@ $body_classes = implode(' ', [
         })
         .then(response => response.json())
         .then(data => {
-            window.location.href = baseUrl + 'user/notifications.php';
+            window.location.href = '<?= $notification_page ?>';
         })
         .catch(error => {
             console.error('Error marking notification as read:', error);
-            window.location.href = baseUrl + 'user/notifications.php';
+            window.location.href = '<?= $notification_page ?>';
         });
     }
     
@@ -501,7 +513,7 @@ $body_classes = implode(' ', [
                 if (notificationId) {
                     markAsReadAndRedirect(notificationId);
                 } else {
-                    window.location.href = baseUrl + 'user/notifications.php';
+                    window.location.href = '<?= $notification_page ?>';
                 }
             });
         });

@@ -130,6 +130,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             position: relative;
             overflow: hidden;
         }
+        .profile-header h2 {
+            color: #FFFFFF;
+        }
+        .profile-header p {
+            color: rgba(255,255,255,0.88);
+        }
+        .profile-header p i {
+            color: rgba(255,255,255,0.78);
+        }
         
         .profile-header::before {
             content: '';
@@ -205,6 +214,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 15px 20px;
             border-radius: 20px 20px 0 0;
             font-weight: 600;
+            color: #2C3E50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .btn-primary-custom {
