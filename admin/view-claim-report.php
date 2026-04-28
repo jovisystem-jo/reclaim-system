@@ -421,7 +421,7 @@ if ($isAdmin) {
         </button>
     </div>
     
-    <div class="report-container">
+        <div class="report-container">
         <!-- Header -->
         <div class="report-header">
             <h1><i class="fas fa-recycle"></i> RECLAIM SYSTEM</h1>

@@ -507,7 +507,7 @@ $base_url = '/reclaim-system/';
                         <div class="col-md-3">
                             <div class="d-flex gap-2">
                                 <button type="submit" class="btn btn-primary-custom btn-sm w-100">
-                                    <i class="fas fa-search"></i> Filter
+                                    <i class="fas fa-filter"></i> Filter
                                 </button>
                                 <a href="claim-history.php" class="btn btn-secondary-custom btn-sm">
                                     <i class="fas fa-redo"></i> Reset

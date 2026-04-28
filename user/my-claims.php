@@ -459,7 +459,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             </span>
                         </div>
                         
-                        <div class="claim-card-body">
+                               <div class="claim-card-body">
                             <?php 
                             $hasImage = !empty($claim['image_url']) && file_exists(__DIR__ . '/../' . $claim['image_url']);
                             $imageUrl = $hasImage ? $base_url . $claim['image_url'] : '';
@@ -501,36 +501,40 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                         </div>
                         
                         <div class="claim-footer">
-                            <!-- View Item Details -->
+                            <!-- View Item Details - Always visible -->
                             <a href="<?= $base_url ?>item-details.php?id=<?= $claim['item_id'] ?>" class="btn btn-info btn-action">
                                 <i class="fas fa-box"></i> View Item Details
                             </a>
                             
-                            <!-- View Claim Report - For Approved and Completed claims -->
-                            <?php if($claim['status'] == 'approved' || $claim['status'] == 'completed'): ?>
+                            <!-- View Claim Report - ONLY for Completed claims (after user confirms reclaim) -->
+                            <?php if($claim['status'] == 'completed'): ?>
                                 <a href="<?= $base_url ?>admin/view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary btn-action" target="_blank">
                                     <i class="fas fa-file-pdf"></i> View Claim Report
                                 </a>
                             <?php endif; ?>
                             
+                            <!-- Cancel Claim - Only for Pending claims -->
                             <?php if($claim['status'] == 'pending'): ?>
                                 <button onclick="openCancelModal(<?= $claim['claim_id'] ?>)" class="btn btn-danger btn-action">
                                     <i class="fas fa-times"></i> Cancel Claim
                                 </button>
                             <?php endif; ?>
                             
+                            <!-- Confirm Reclaim - Only for Approved claims (not yet completed) -->
                             <?php if($claim['status'] == 'approved'): ?>
                                 <button onclick="openCompleteModal(<?= $claim['claim_id'] ?>)" class="btn btn-success btn-action">
                                     <i class="fas fa-handshake"></i> Confirm Reclaim
                                 </button>
                             <?php endif; ?>
                             
+                            <!-- View Returned Item - Only for Completed claims -->
                             <?php if($claim['status'] == 'completed'): ?>
                                 <a href="<?= $base_url ?>item-details.php?id=<?= $claim['item_id'] ?>" class="btn btn-secondary btn-action">
-                                    <i class="fas fa-check-double"></i> View Returned Item
+                                    <i class="fas fa-box-open"></i> View Returned Item
                                 </a>
                             <?php endif; ?>
                             
+                            <!-- Disabled buttons for Rejected and Cancelled -->
                             <?php if($claim['status'] == 'rejected'): ?>
                                 <button class="btn btn-secondary btn-action" disabled>
                                     <i class="fas fa-times-circle"></i> Claim Rejected
@@ -571,14 +575,15 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             <li>✓ After confirmation, your claim will be marked as <strong>COMPLETED</strong></li>
                             <li>✓ You will receive a notification confirming the successful reclaim</li>
                             <li>✓ The item status will be updated to <strong>RETURNED</strong></li>
-                            <li>✓ You can still <strong>view the claim report</strong> anytime after confirmation</li>
+                            <li>✓ You will be able to <strong>view the claim report</strong> after confirmation</li>
+                            <li>✓ The "Confirm Reclaim" button will be replaced with "View Claim Report"</li>
                             <li>✓ This action <strong>cannot be undone</strong></li>
                         </ul>
                     </div>
                     
                     <div class="alert alert-info">
                         <i class="fas fa-file-pdf me-2"></i>
-                        <strong>Note:</strong> After confirming, you can still access the Claim Report from your claims list.
+                        <strong>Note:</strong> After confirming, you will be able to access the Claim Report from your claims list.
                     </div>
                 </div>
                 <div class="modal-footer">
