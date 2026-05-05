@@ -161,6 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
                 $itemID = $db->lastInsertId();
+                $similarFoundMatches = 0;
                 
                 // Send notification to user
                 $notifTitle = $status == 'lost' ? "🔍 Lost Item Reported" : "📍 Found Item Reported";
@@ -173,6 +174,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $success = 'Lost item reported successfully!';
                     if (!empty($image_url)) {
                         $success .= ' Image uploaded successfully.';
+                    }
+                    $similarFoundMatches = $notification->notifySimilarFoundItemsForLostReport((int) $itemID, (int) $_SESSION['userID']);
+                    if ($similarFoundMatches > 0) {
+                        $success .= ' We found ' . $similarFoundMatches . ' similar found item' . ($similarFoundMatches === 1 ? '' : 's') . ' and sent you a notification.';
                     }
                 } else {
                     $stmt = $db->prepare("INSERT INTO found_reports (itemID, reporterID, found_by) VALUES (?, ?, ?)");

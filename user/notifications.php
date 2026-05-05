@@ -190,6 +190,26 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             border-radius: 20px 20px 0 0;
             padding: 15px 20px;
         }
+        .notification-header-actions {
+            display: flex;
+            align-items: center;
+        }
+        .notification-action-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 36px;
+            padding: 6px 14px;
+            line-height: 1;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 13px;
+        }
+        .notification-action-btn i {
+            margin: 0;
+            line-height: 1;
+        }
         .btn-outline-primary {
             border-color: #FF8C00;
             color: #FF8C00;
@@ -215,9 +235,9 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         <div class="card fade-in">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0"><i class="fas fa-bell me-2" style="color: #FF8C00;"></i> Notifications</h4>
-                <div>
+                <div class="notification-header-actions">
                     <?php if($total_notifications > 0): ?>
-                    <a href="?mark_all=1&csrf_token=<?= urlencode(csrf_token()) ?>" class="btn btn-sm btn-outline-primary me-2" onclick="return confirm('Mark all notifications as read?')">
+                    <a href="?mark_all=1&csrf_token=<?= urlencode(csrf_token()) ?>" class="btn btn-sm btn-outline-primary notification-action-btn" onclick="return confirm('Mark all notifications as read?')">
                         <i class="fas fa-check-double"></i> Mark all as read
                     </a>
                     <?php endif; ?>

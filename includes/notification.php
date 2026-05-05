@@ -228,6 +228,174 @@ class NotificationSystem {
             $this->send($reporterId, $title, $message, 'success');
         }
     }
+
+    /**
+     * Notify a lost-item reporter when similar open found items already exist
+     */
+    public function notifySimilarFoundItemsForLostReport($lostItemId, $userId, $limit = 3) {
+        $stmt = $this->db->prepare("
+            SELECT item_id, title, description, category, brand, color, found_location, date_found
+            FROM items
+            WHERE item_id = ? AND status = 'lost' AND user_id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$lostItemId, $userId]);
+        $lostItem = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$lostItem) {
+            return 0;
+        }
+
+        $matches = $this->findSimilarFoundItems($lostItem, $limit);
+        if (empty($matches)) {
+            return 0;
+        }
+
+        $matchCount = count($matches);
+        $title = $matchCount === 1 ? 'Similar Found Item Detected' : 'Similar Found Items Detected';
+        $messageLines = [
+            "We found {$matchCount} similar found item" . ($matchCount === 1 ? '' : 's') . " for your lost report '{$lostItem['title']}'.",
+            '',
+            'Possible matches:'
+        ];
+
+        foreach ($matches as $index => $match) {
+            $summaryParts = [];
+            if (!empty($match['brand'])) {
+                $summaryParts[] = 'Brand: ' . $match['brand'];
+            }
+            if (!empty($match['color'])) {
+                $summaryParts[] = 'Color: ' . $match['color'];
+            }
+            if (!empty($match['found_location'])) {
+                $summaryParts[] = 'Location: ' . $match['found_location'];
+            }
+            if (!empty($match['date_found'])) {
+                $summaryParts[] = 'Date: ' . date('M d, Y', strtotime($match['date_found']));
+            }
+
+            $messageLines[] = ($index + 1) . '. ' . ($match['title'] ?: 'Untitled item') . ' (Item #' . $match['item_id'] . ')';
+            if (!empty($summaryParts)) {
+                $messageLines[] = '   ' . implode(' | ', $summaryParts);
+            }
+        }
+
+        $messageLines[] = '';
+        $messageLines[] = 'Please review these items in Search Items or in your reports dashboard.';
+
+        $this->send($userId, $title, implode("\n", $messageLines), 'info');
+
+        return $matchCount;
+    }
+
+    /**
+     * Find the strongest open found-item matches for a lost report
+     */
+    private function findSimilarFoundItems($lostItem, $limit = 3) {
+        $stmt = $this->db->prepare("
+            SELECT item_id, title, description, category, brand, color, found_location, date_found, reported_date
+            FROM items
+            WHERE status = 'found' AND category = ?
+            ORDER BY reported_date DESC
+            LIMIT 50
+        ");
+        $stmt->execute([$lostItem['category']]);
+        $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($candidates)) {
+            return [];
+        }
+
+        $lostBrand = $this->normalizeMatchValue($lostItem['brand'] ?? '');
+        $lostColor = $this->normalizeMatchValue($lostItem['color'] ?? '');
+        $lostLocation = $this->normalizeMatchValue($lostItem['found_location'] ?? '');
+        $lostKeywords = $this->extractMatchKeywords(($lostItem['title'] ?? '') . ' ' . ($lostItem['description'] ?? ''));
+        $matches = [];
+
+        foreach ($candidates as $candidate) {
+            $score = 0;
+
+            $candidateBrand = $this->normalizeMatchValue($candidate['brand'] ?? '');
+            $candidateColor = $this->normalizeMatchValue($candidate['color'] ?? '');
+            $candidateLocation = $this->normalizeMatchValue($candidate['found_location'] ?? '');
+            $candidateKeywords = $this->extractMatchKeywords(($candidate['title'] ?? '') . ' ' . ($candidate['description'] ?? ''));
+            $keywordOverlap = count(array_intersect($lostKeywords, $candidateKeywords));
+
+            if ($lostBrand !== '' && $candidateBrand !== '' && $lostBrand === $candidateBrand) {
+                $score += 4;
+            }
+
+            if ($lostColor !== '' && $candidateColor !== '' && $lostColor === $candidateColor) {
+                $score += 2;
+            }
+
+            if ($lostLocation !== '' && $candidateLocation !== '' && $lostLocation === $candidateLocation) {
+                $score += 1;
+            }
+
+            if ($keywordOverlap > 0) {
+                $score += min(4, $keywordOverlap);
+            }
+
+            $sameBrand = $lostBrand !== '' && $candidateBrand !== '' && $lostBrand === $candidateBrand;
+            $sameColor = $lostColor !== '' && $candidateColor !== '' && $lostColor === $candidateColor;
+            $isStrongKeywordMatch = $keywordOverlap >= 2;
+
+            if ($score >= 4 || $sameBrand || ($sameColor && $keywordOverlap >= 1) || $isStrongKeywordMatch) {
+                $candidate['_match_score'] = $score;
+                $matches[] = $candidate;
+            }
+        }
+
+        usort($matches, function ($left, $right) {
+            $leftScore = $left['_match_score'] ?? 0;
+            $rightScore = $right['_match_score'] ?? 0;
+
+            if ($leftScore === $rightScore) {
+                return strcmp((string) ($right['reported_date'] ?? ''), (string) ($left['reported_date'] ?? ''));
+            }
+
+            return $rightScore <=> $leftScore;
+        });
+
+        return array_slice($matches, 0, $limit);
+    }
+
+    /**
+     * Normalize text values before comparing them
+     */
+    private function normalizeMatchValue($value) {
+        $normalized = strtolower(trim((string) $value));
+
+        if ($normalized === '' || in_array($normalized, ['other', 'generic', 'no brand', 'not specified'], true)) {
+            return '';
+        }
+
+        return preg_replace('/\s+/', ' ', $normalized);
+    }
+
+    /**
+     * Extract useful keywords for lightweight item similarity matching
+     */
+    private function extractMatchKeywords($text) {
+        $tokens = preg_split('/[^a-z0-9]+/i', strtolower((string) $text));
+        $stopWords = [
+            'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'has', 'item',
+            'lost', 'found', 'black', 'white', 'blue', 'red', 'green', 'other', 'than',
+            'into', 'onto', 'near', 'your', 'their', 'mine', 'ours', 'inside', 'outside'
+        ];
+        $keywords = [];
+
+        foreach ($tokens as $token) {
+            if ($token === '' || strlen($token) < 3 || in_array($token, $stopWords, true)) {
+                continue;
+            }
+
+            $keywords[$token] = true;
+        }
+
+        return array_keys($keywords);
+    }
     
     /**
      * Log email to database

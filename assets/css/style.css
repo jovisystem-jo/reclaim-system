@@ -862,6 +862,15 @@ textarea.form-control {
     padding: clamp(20px, 3vw, 28px) 0 16px;
 }
 
+.footer-container {
+    padding: clamp(18px, 2.4vw, 26px);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(8px);
+}
+
 .footer h5 {
     margin-bottom: 10px;
     font-size: 0.9rem;
@@ -875,6 +884,12 @@ textarea.form-control {
 
 .footer li {
     margin-bottom: 6px;
+}
+
+.footer hr {
+    margin: 16px 0;
+    border-color: rgba(31, 41, 51, 0.08);
+    opacity: 1;
 }
 
 /* Item Cards - Smaller */
