@@ -1,17 +1,21 @@
 <?php
 require_once '../config/database.php';
 require_once '../includes/auth.php';
+require_once '../includes/admin_signature.php';
 requireAdmin();
 
 $db = Database::getInstance()->getConnection();
 $message = '';
 $error = '';
+$base_url = '/reclaim-system/';
 
 // Create signature uploads directory if not exists
 $signatureDir = __DIR__ . '/../assets/uploads/signatures/';
 if (!file_exists($signatureDir)) {
     mkdir($signatureDir, 0755, true);
 }
+
+$admin_signature = reclaimGetAdminSignature($db, (int) ($_SESSION['userID'] ?? 0), $base_url);
 
 // Handle signature save
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_signature'])) {
@@ -25,8 +29,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_signature'])) {
     if (empty($signature_name) || empty($signature_id)) {
         $error = 'Name and Staff ID are required fields.';
     } else {
-        // Handle signature image upload
-        $signature_image = $_SESSION['admin_signature']['image'] ?? '';
+        $existing_signature_image = $admin_signature['image_path'] ?? '';
+        $signature_image = $existing_signature_image;
+        $uploaded_signature_image = '';
+        $remove_signature = isset($_POST['remove_signature']) && $_POST['remove_signature'] === '1';
         
         if (isset($_FILES['signature_image']) && $_FILES['signature_image']['error'] === UPLOAD_ERR_OK) {
             $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
@@ -36,16 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_signature'])) {
             if ($_FILES['signature_image']['size'] > $max_size) {
                 $error = 'Signature image must be less than 2MB.';
             } elseif (in_array($extension, $allowed)) {
-                // Delete old signature if exists
-                if (!empty($signature_image) && file_exists(__DIR__ . '/../' . $signature_image)) {
-                    unlink(__DIR__ . '/../' . $signature_image);
-                }
-                
                 $filename = 'admin_signature_' . $_SESSION['userID'] . '_' . time() . '.' . $extension;
                 $target_path = $signatureDir . $filename;
+                $stored_path = 'assets/uploads/signatures/' . $filename;
                 
                 if (move_uploaded_file($_FILES['signature_image']['tmp_name'], $target_path)) {
-                    $signature_image = '/reclaim-system/assets/uploads/signatures/' . $filename;
+                    $uploaded_signature_image = $stored_path;
+                    $signature_image = $stored_path;
                 } else {
                     $error = 'Failed to upload signature image.';
                 }
@@ -54,41 +57,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_signature'])) {
             }
         }
         
-        // Remove signature image if checkbox is checked
-        if (isset($_POST['remove_signature']) && $_POST['remove_signature'] == '1') {
-            if (!empty($signature_image) && file_exists(__DIR__ . '/../' . $signature_image)) {
-                unlink(__DIR__ . '/../' . $signature_image);
-            }
+        if ($remove_signature && $uploaded_signature_image === '') {
             $signature_image = '';
         }
         
         if (empty($error)) {
-            // Save signature data to session
-            $_SESSION['admin_signature'] = [
+            if ($uploaded_signature_image !== '' && $existing_signature_image !== '' && $existing_signature_image !== $uploaded_signature_image) {
+                reclaimDeleteSignatureImage($existing_signature_image);
+            } elseif ($remove_signature && $existing_signature_image !== '') {
+                reclaimDeleteSignatureImage($existing_signature_image);
+            }
+
+            $admin_signature = reclaimSaveAdminSignature($db, (int) $_SESSION['userID'], [
                 'name' => $signature_name,
                 'id' => $signature_id,
                 'position' => $signature_position,
                 'department' => $signature_department,
-                'image' => $signature_image,
-                'updated_at' => date('Y-m-d H:i:s')
-            ];
-            
+                'image' => $signature_image
+            ], $base_url);
+
             $message = "Signature settings saved successfully!";
         }
     }
 }
-
-// Get saved signature data
-$admin_signature = $_SESSION['admin_signature'] ?? [
-    'name' => $_SESSION['name'] ?? '',
-    'id' => $_SESSION['userID'] ?? '',
-    'position' => 'Administrator',
-    'department' => 'Auxiliary Police and Security Office',
-    'image' => '',
-    'updated_at' => ''
-];
-
-$base_url = '/reclaim-system/';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -308,7 +299,7 @@ $base_url = '/reclaim-system/';
                                         <small class="text-muted">
                                             <i class="fas fa-info-circle me-1"></i> 
                                             Upload an image of your handwritten signature. Allowed: JPG, PNG, GIF, WEBP. Max 2MB.
-                                            Leave empty to use text signature.
+                                            Leave empty to keep your current signature image. Remove it only if you want to switch back to text signature.
                                         </small>
                                     </div>
                                     
@@ -371,7 +362,7 @@ $base_url = '/reclaim-system/';
                                 
                                 <div class="alert alert-info mt-3">
                                     <i class="fas fa-info-circle me-2"></i>
-                                    <strong>Note:</strong> Once saved, this signature will be automatically applied to all future claim approvals. You can update it anytime.
+                                    <strong>Note:</strong> Once saved, this signature stays for future claim approvals until you replace it or remove it.
                                 </div>
                             </div>
                         </div>

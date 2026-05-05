@@ -193,12 +193,27 @@ $base_url = '/reclaim-system/';
             margin-bottom: 20px;
         }
         
-        .card-modern .card-header {
+        body.app-page.admin-page .card-modern .card-header {
             background: white;
             border-bottom: 2px solid #FF6B35;
             padding: 15px 20px;
             border-radius: 20px 20px 0 0;
             font-weight: 600;
+            color: #2C3E50;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-modern .card-header i {
+            flex-shrink: 0;
+        }
+
+        .chart-card-title {
+            color: #2C3E50;
+            font-size: inherit;
+            font-weight: inherit;
+            line-height: 1.3;
         }
         
         .btn-primary-custom {
@@ -401,7 +416,8 @@ $base_url = '/reclaim-system/';
                     <div class="col-lg-6">
                         <div class="card-modern card">
                             <div class="card-header">
-                                <i class="fas fa-chart-pie me-2" style="color: #FF6B35;"></i> Items by Status
+                                <i class="fas fa-chart-pie" style="color: #FF6B35;"></i>
+                                <span class="chart-card-title">Items by Status</span>
                             </div>
                             <div class="card-body">
                                 <div class="chart-container">
@@ -428,7 +444,8 @@ $base_url = '/reclaim-system/';
                     <div class="col-lg-6">
                         <div class="card-modern card">
                             <div class="card-header">
-                                <i class="fas fa-chart-pie me-2" style="color: #FF6B35;"></i> Items by Category
+                                <i class="fas fa-chart-pie" style="color: #FF6B35;"></i>
+                                <span class="chart-card-title">Items by Category</span>
                             </div>
                             <div class="card-body">
                                 <div class="chart-container">
@@ -444,7 +461,8 @@ $base_url = '/reclaim-system/';
                     <div class="col-lg-6">
                         <div class="card-modern card">
                             <div class="card-header">
-                                <i class="fas fa-chart-line me-2" style="color: #FF6B35;"></i> Claims Trend (Last 12 Months)
+                                <i class="fas fa-chart-line" style="color: #FF6B35;"></i>
+                                <span class="chart-card-title">Claims Trend (Last 12 Months)</span>
                             </div>
                             <div class="card-body">
                                 <div class="chart-container">
@@ -457,7 +475,8 @@ $base_url = '/reclaim-system/';
                     <div class="col-lg-6">
                         <div class="card-modern card">
                             <div class="card-header">
-                                <i class="fas fa-chart-line me-2" style="color: #FF6B35;"></i> Items Trend (Last 12 Months)
+                                <i class="fas fa-chart-line" style="color: #FF6B35;"></i>
+                                <span class="chart-card-title">Items Trend (Last 12 Months)</span>
                             </div>
                             <div class="card-body">
                                 <div class="chart-container">
@@ -504,7 +523,7 @@ $base_url = '/reclaim-system/';
                                                         <?php else: ?>
                                                             <?= $rank ?>
                                                         <?php endif; ?>
-                                                     </td
+                                                    </td>
                                                     <td><?= htmlspecialchars($reporter['name']) ?></td>
                                                     <td><?= htmlspecialchars($reporter['email']) ?></td>
                                                     <td><span class="badge bg-primary"><?= $reporter['items_reported'] ?></span></td>
@@ -522,7 +541,8 @@ $base_url = '/reclaim-system/';
                     <div class="col-lg-6">
                         <div class="card-modern card">
                             <div class="card-header">
-                                <i class="fas fa-user-plus me-2" style="color: #FF6B35;"></i> New Users (Last 12 Months)
+                                <i class="fas fa-user-plus" style="color: #FF6B35;"></i>
+                                <span class="chart-card-title">New Users (Last 12 Months)</span>
                             </div>
                             <div class="card-body">
                                 <div class="chart-container">
@@ -568,6 +588,22 @@ $base_url = '/reclaim-system/';
     </div>
     
     <script>
+        function createChartOptions(extraOptions = {}) {
+            const extraPlugins = extraOptions.plugins || {};
+
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                ...extraOptions,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    ...extraPlugins
+                }
+            };
+        }
+
         // Items by Status Chart (Pie)
         const statusCtx = document.getElementById('statusChart').getContext('2d');
         new Chart(statusCtx, {
@@ -585,15 +621,7 @@ $base_url = '/reclaim-system/';
                     borderWidth: 0
                 }]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    }
-                }
-            }
+            options: createChartOptions()
         });
         
         // Items by Category Chart (Bar)
@@ -611,16 +639,19 @@ $base_url = '/reclaim-system/';
                     borderRadius: 10
                 }]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
+            options: createChartOptions({
                 scales: {
                     y: {
                         beginAtZero: true,
                         ticks: { stepSize: 1 }
                     }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
                 }
-            }
+            })
         });
         
         // Claims Trend Chart (Line)
@@ -660,13 +691,7 @@ $base_url = '/reclaim-system/';
                     }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom' }
-                }
-            }
+            options: createChartOptions()
         });
         
         // Items Trend Chart
@@ -706,13 +731,7 @@ $base_url = '/reclaim-system/';
                     }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom' }
-                }
-            }
+            options: createChartOptions()
         });
         
         // Users Trend Chart
@@ -730,16 +749,19 @@ $base_url = '/reclaim-system/';
                     borderRadius: 10
                 }]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
+            options: createChartOptions({
                 scales: {
                     y: {
                         beginAtZero: true,
                         ticks: { stepSize: 1 }
                     }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
                 }
-            }
+            })
         });
         
         function exportToPDF() {

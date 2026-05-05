@@ -1,11 +1,14 @@
 <?php
 require_once '../config/database.php';
 require_once '../includes/auth.php';
+require_once '../includes/claim_status.php';
 requireAdmin();
 
 $db = Database::getInstance()->getConnection();
+reclaimEnsureClaimStatusSchema($db);
 
 // Get filter parameters
+$allowed_statuses = ['approved', 'rejected'];
 $status_filter = $_GET['status'] ?? 'all';
 $search = $_GET['search'] ?? '';
 $date_from = $_GET['date_from'] ?? '';
@@ -14,7 +17,58 @@ $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $per_page = 20;
 $offset = ($page - 1) * $per_page;
 
+if ($status_filter !== 'all' && !in_array($status_filter, $allowed_statuses, true)) {
+    $status_filter = 'all';
+}
+
+$params = [];
+$where_conditions = ["c.status IN ('approved', 'completed', 'rejected')"];
+
+if ($status_filter !== 'all') {
+    if ($status_filter === 'approved') {
+        $where_conditions[] = "c.status IN ('approved', 'completed')";
+    } elseif ($status_filter === 'rejected') {
+        $where_conditions[] = "c.status = ?";
+        $params[] = $status_filter;
+    }
+}
+
+if (!empty($search)) {
+    $where_conditions[] = "(i.title LIKE ? OR u.name LIKE ? OR u.email LIKE ? OR c.claim_id LIKE ?)";
+    $search_term = "%$search%";
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+}
+
+if (!empty($date_from)) {
+    $where_conditions[] = "DATE(COALESCE(c.verified_date, c.created_at)) >= ?";
+    $params[] = $date_from;
+}
+
+if (!empty($date_to)) {
+    $where_conditions[] = "DATE(COALESCE(c.verified_date, c.created_at)) <= ?";
+    $params[] = $date_to;
+}
+
 // Build query for claim history
+$from_sql = "
+    FROM claim_requests c
+    JOIN items i ON c.item_id = i.item_id
+    JOIN users u ON c.claimant_id = u.user_id
+    LEFT JOIN users admin ON c.verified_by = admin.user_id
+";
+$where_sql = empty($where_conditions) ? '' : ' WHERE ' . implode(' AND ', $where_conditions);
+
+// Get total count for pagination
+$count_sql = "SELECT COUNT(*) " . $from_sql . $where_sql;
+$stmt = $db->prepare($count_sql);
+$stmt->execute($params);
+$total_records = $stmt->fetchColumn();
+$total_pages = ceil($total_records / $per_page);
+
+// Add pagination to main query
 $sql = "
     SELECT c.*, 
            i.title as item_title, 
@@ -30,49 +84,12 @@ $sql = "
            u.phone as claimant_phone,
            u.student_staff_id as claimant_student_id, 
            u.department as claimant_department,
-           admin.name as verified_by_name
-    FROM claim_requests c
-    JOIN items i ON c.item_id = i.item_id
-    JOIN users u ON c.claimant_id = u.user_id
-    LEFT JOIN users admin ON c.verified_by = admin.user_id
-    WHERE c.status IN ('approved', 'completed', 'rejected')
+           admin.name as verified_by_name,
+           COALESCE(c.verified_date, c.created_at) as history_date
+    " . $from_sql . $where_sql . "
+    ORDER BY history_date DESC
+    LIMIT ? OFFSET ?
 ";
-
-$params = [];
-
-if ($status_filter !== 'all') {
-    $sql .= " AND c.status = ?";
-    $params[] = $status_filter;
-}
-
-if (!empty($search)) {
-    $sql .= " AND (i.title LIKE ? OR u.name LIKE ? OR u.email LIKE ? OR c.claim_id LIKE ?)";
-    $search_term = "%$search%";
-    $params[] = $search_term;
-    $params[] = $search_term;
-    $params[] = $search_term;
-    $params[] = $search_term;
-}
-
-if (!empty($date_from)) {
-    $sql .= " AND DATE(c.verified_date) >= ?";
-    $params[] = $date_from;
-}
-
-if (!empty($date_to)) {
-    $sql .= " AND DATE(c.verified_date) <= ?";
-    $params[] = $date_to;
-}
-
-// Get total count for pagination
-$count_sql = str_replace("SELECT c.*, i.title as item_title, i.description as item_description, i.image_url, i.found_location, i.delivery_location, i.brand, i.color, i.category, u.name as claimant_name, u.email as claimant_email, u.phone as claimant_phone, u.student_staff_id as claimant_student_id, u.department as claimant_department, admin.name as verified_by_name", "SELECT COUNT(*)", $sql);
-$stmt = $db->prepare($count_sql);
-$stmt->execute($params);
-$total_records = $stmt->fetchColumn();
-$total_pages = ceil($total_records / $per_page);
-
-// Add pagination to main query
-$sql .= " ORDER BY c.verified_date DESC LIMIT ? OFFSET ?";
 $params[] = $per_page;
 $params[] = $offset;
 
@@ -84,8 +101,7 @@ $claims = $stmt->fetchAll();
 $stats_sql = "
     SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status IN ('approved', 'completed') THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
     FROM claim_requests
     WHERE status IN ('approved', 'completed', 'rejected')
@@ -96,7 +112,7 @@ $stats = $stats_stmt->fetch();
 
 // Get this month's count
 $this_month = date('Y-m');
-$month_sql = "SELECT COUNT(*) FROM claim_requests WHERE status IN ('approved', 'completed', 'rejected') AND DATE_FORMAT(verified_date, '%Y-%m') = ?";
+$month_sql = "SELECT COUNT(*) FROM claim_requests WHERE status IN ('approved', 'completed', 'rejected') AND DATE_FORMAT(COALESCE(verified_date, created_at), '%Y-%m') = ?";
 $month_stmt = $db->prepare($month_sql);
 $month_stmt->execute([$this_month]);
 $stats['this_month'] = $month_stmt->fetchColumn();
@@ -204,7 +220,6 @@ $base_url = '/reclaim-system/';
             font-size: 13px;
         }
         .stat-card.approved i { color: #28a745; }
-        .stat-card.completed i { color: #17a2b8; }
         .stat-card.rejected i { color: #dc3545; }
         .stat-card.total i { color: #FF6B35; }
         .stat-card.month i { color: #6c757d; }
@@ -314,10 +329,6 @@ $base_url = '/reclaim-system/';
         .status-approved {
             background: #D1FAE5;
             color: #059669;
-        }
-        .status-completed {
-            background: #DBEAFE;
-            color: #2563EB;
         }
         .status-rejected {
             background: #FEE2E2;
@@ -439,35 +450,28 @@ $base_url = '/reclaim-system/';
                 
                 <!-- Statistics Cards -->
                 <div class="row mb-4 g-3">
-                    <div class="col-md-2 col-6">
+                    <div class="col-md-3 col-6">
                         <div class="stat-card total">
                             <i class="fas fa-chart-line"></i>
                             <h3><?= number_format($stats['total']) ?></h3>
                             <p>Total Claims</p>
                         </div>
                     </div>
-                    <div class="col-md-2 col-6">
+                    <div class="col-md-3 col-6">
                         <div class="stat-card approved">
                             <i class="fas fa-check-circle"></i>
                             <h3><?= number_format($stats['approved']) ?></h3>
                             <p>Approved</p>
                         </div>
                     </div>
-                    <div class="col-md-2 col-6">
-                        <div class="stat-card completed">
-                            <i class="fas fa-check-double"></i>
-                            <h3><?= number_format($stats['completed']) ?></h3>
-                            <p>Completed</p>
-                        </div>
-                    </div>
-                    <div class="col-md-2 col-6">
+                    <div class="col-md-3 col-6">
                         <div class="stat-card rejected">
                             <i class="fas fa-times-circle"></i>
                             <h3><?= number_format($stats['rejected']) ?></h3>
                             <p>Rejected</p>
                         </div>
                     </div>
-                    <div class="col-md-2 col-6">
+                    <div class="col-md-3 col-6">
                         <div class="stat-card month">
                             <i class="fas fa-calendar-month"></i>
                             <h3><?= number_format($stats['this_month']) ?></h3>
@@ -484,7 +488,6 @@ $base_url = '/reclaim-system/';
                             <select name="status" class="form-select form-select-sm">
                                 <option value="all" <?= $status_filter == 'all' ? 'selected' : '' ?>>All Status</option>
                                 <option value="approved" <?= $status_filter == 'approved' ? 'selected' : '' ?>>Approved</option>
-                                <option value="completed" <?= $status_filter == 'completed' ? 'selected' : '' ?>>Completed</option>
                                 <option value="rejected" <?= $status_filter == 'rejected' ? 'selected' : '' ?>>Rejected</option>
                             </select>
                         </div>
@@ -529,7 +532,7 @@ $base_url = '/reclaim-system/';
                     <div class="empty-state">
                         <i class="fas fa-inbox"></i>
                         <h4>No claim history found</h4>
-                        <p>There are no processed claims matching your criteria.</p>
+                        <p>There are no approved or rejected claim records matching your criteria.</p>
                         <a href="verify-claims.php" class="btn btn-primary-custom">
                             <i class="fas fa-check-double"></i> Go to Verify Claims
                         </a>
@@ -545,12 +548,10 @@ $base_url = '/reclaim-system/';
                                 </small>
                             </div>
                             <div>
-                                <?php if($claim['status'] == 'approved'): ?>
-                                    <span class="status-badge status-approved"><i class="fas fa-check-circle"></i> Approved</span>
-                                <?php elseif($claim['status'] == 'completed'): ?>
-                                    <span class="status-badge status-completed"><i class="fas fa-check-double"></i> Completed</span>
-                                <?php elseif($claim['status'] == 'rejected'): ?>
+                                <?php if($claim['status'] == 'rejected'): ?>
                                     <span class="status-badge status-rejected"><i class="fas fa-times-circle"></i> Rejected</span>
+                                <?php else: ?>
+                                    <span class="status-badge status-approved"><i class="fas fa-check-circle"></i> Approved</span>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -611,7 +612,7 @@ $base_url = '/reclaim-system/';
                             </div>
                         </div>
                         <div class="history-footer">
-                            <a href="view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary-custom btn-action-compact" target="_blank">
+                            <a href="view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary-custom btn-action-compact">
                                 <i class="fas fa-file-alt"></i> View Report
                             </a>
                         </div>

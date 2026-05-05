@@ -1,6 +1,7 @@
 <?php
 require_once '../config/database.php';
 require_once '../includes/auth.php';
+require_once '../includes/admin_signature.php';
 requireAdmin();
 require_once '../includes/notification.php';
 
@@ -8,16 +9,9 @@ $db = Database::getInstance()->getConnection();
 $notification = new NotificationSystem();
 $message = '';
 $error = '';
+$base_url = '/reclaim-system/';
 
-// Get saved signature data from session
-$admin_signature = $_SESSION['admin_signature'] ?? [
-    'name' => $_SESSION['name'] ?? '',
-    'id' => $_SESSION['userID'] ?? '',
-    'position' => 'Administrator',
-    'department' => 'Auxiliary Police and Security Office',
-    'image' => '',
-    'updated_at' => ''
-];
+$admin_signature = reclaimGetAdminSignature($db, (int) ($_SESSION['userID'] ?? 0), $base_url);
 
 // Handle claim verification
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id']) && isset($_POST['action'])) {
@@ -133,7 +127,6 @@ if (!empty($pending_claims)) {
     }
 }
 
-$base_url = '/reclaim-system/';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -598,7 +591,7 @@ $base_url = '/reclaim-system/';
                                 <span class="status-pending"><i class="fas fa-clock"></i> Pending Verification</span>
                             </div>
                             <div class="action-buttons">
-                                <a href="view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary-custom btn-action-compact" target="_blank">
+                                <a href="view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary-custom btn-action-compact">
                                     <i class="fas fa-file-alt"></i> View Report
                                 </a>
                             </div>

@@ -184,6 +184,34 @@ $base_url = '/reclaim-system/';
         .welcome-banner p {
             color: #FFFFFF;
         }
+
+        .welcome-banner-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-home-banner {
+            background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.35);
+            color: white;
+            padding: 8px 18px;
+            border-radius: 50px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.3s;
+            backdrop-filter: blur(6px);
+        }
+
+        .btn-home-banner:hover {
+            background: white;
+            color: #E85D2C;
+            transform: translateY(-2px);
+        }
         
         .status-badge {
             padding: 5px 12px;
@@ -214,7 +242,10 @@ $base_url = '/reclaim-system/';
                             <h2>Welcome back, <?= htmlspecialchars($_SESSION['name']) ?>!</h2>
                             <p class="mb-0 opacity-75">Here's what's happening with your lost and found system today.</p>
                         </div>
-                        <div>
+                        <div class="welcome-banner-actions">
+                            <a href="<?= $base_url ?>" class="btn-home-banner">
+                                <i class="fas fa-home"></i> Home
+                            </a>
                             <i class="fas fa-chart-line fa-3x opacity-50"></i>
                         </div>
                     </div>

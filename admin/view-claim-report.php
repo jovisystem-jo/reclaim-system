@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/admin_signature.php';
+require_once __DIR__ . '/../includes/claim_status.php';
 
 // Allow both admin and authenticated users to view their own claim reports
 $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
@@ -14,6 +16,8 @@ if ($claimId == 0) {
 }
 
 $db = Database::getInstance()->getConnection();
+$base_url = '/reclaim-system/';
+reclaimEnsureClaimStatusSchema($db);
 
 // First, check if claim exists and get basic info
 if ($isAdmin) {
@@ -61,28 +65,53 @@ $stmt = $db->prepare("
 $stmt->execute([$claim['item_id']]);
 $founder = $stmt->fetch(PDO::FETCH_ASSOC);
 
-// Get saved signature data from session (for admin) or from database
-$admin_signature = $_SESSION['admin_signature'] ?? [
-    'name' => $_SESSION['name'] ?? '',
-    'id' => $_SESSION['userID'] ?? '',
-    'position' => 'Administrator',
-    'department' => 'Auxiliary Police and Security Office',
-    'image' => '',
-    'updated_at' => ''
-];
+// Load the persisted admin signature used for this claim, or the current admin's signature for previews.
+$signatureOwnerId = !empty($claim['verified_by']) ? (int) $claim['verified_by'] : ($isAdmin ? (int) $userID : 0);
+$admin_signature = $signatureOwnerId > 0
+    ? reclaimGetAdminSignature($db, $signatureOwnerId, $base_url)
+    : reclaimEmptyAdminSignature();
 
-// If claim is approved, try to get signature from claim data
-if ($claim['status'] === 'approved' && !empty($claim['admin_signature'])) {
+// If the claim already has stored signature data, prefer that historical snapshot.
+if (!empty($claim['admin_signature'])) {
     $saved_signature = json_decode($claim['admin_signature'], true);
     if ($saved_signature && is_array($saved_signature)) {
+        if (!empty($saved_signature['image'])) {
+            $saved_signature['image'] = reclaimSignatureImageUrl($saved_signature['image'], $base_url);
+        }
         $admin_signature = array_merge($admin_signature, $saved_signature);
     }
 }
 
 $receipt_number = 'RCL-' . strtoupper(uniqid()) . '-' . $claimId;
-$is_approved = $claim['status'] === 'approved';
-$base_url = '/reclaim-system/';
+$status_key = $claim['status'] ?? 'pending';
+$status_label = 'PENDING VERIFICATION';
+$status_class = 'status-pending';
+$status_stamp = 'PENDING';
+$status_stamp_class = 'stamp-pending';
 
+switch ($status_key) {
+    case 'approved':
+    case 'completed':
+        $status_label = 'APPROVED';
+        $status_class = 'status-approved';
+        $status_stamp = 'APPROVED';
+        $status_stamp_class = 'stamp-approved';
+        break;
+    case 'rejected':
+        $status_label = 'REJECTED';
+        $status_class = 'status-rejected';
+        $status_stamp = 'REJECTED';
+        $status_stamp_class = 'stamp-rejected';
+        break;
+    case 'cancelled':
+        $status_label = 'CANCELLED';
+        $status_class = 'status-cancelled';
+        $status_stamp = 'CANCELLED';
+        $status_stamp_class = 'stamp-cancelled';
+        break;
+}
+
+$report_timestamp = !empty($claim['verified_date']) ? $claim['verified_date'] : ($claim['created_at'] ?? date('Y-m-d H:i:s'));
 // Determine back URL based on user role
 if ($isAdmin) {
     $back_url = 'verify-claims.php';
@@ -224,6 +253,14 @@ if ($isAdmin) {
             background: #27ae60;
             color: white;
         }
+        .status-rejected {
+            background: #dc3545;
+            color: white;
+        }
+        .status-cancelled {
+            background: #6c757d;
+            color: white;
+        }
         
         /* Description Box */
         .description-box {
@@ -298,10 +335,25 @@ if ($isAdmin) {
         }
         .approved-stamp {
             margin-top: 10px;
-            color: #27ae60;
             font-weight: 700;
             font-size: 12px;
             text-transform: uppercase;
+            line-height: 1;
+            display: block;
+            width: 100%;
+            text-align: center;
+        }
+        .approved-stamp.stamp-approved {
+            color: #27ae60;
+        }
+        .approved-stamp.stamp-pending {
+            color: #f39c12;
+        }
+        .approved-stamp.stamp-rejected {
+            color: #dc3545;
+        }
+        .approved-stamp.stamp-cancelled {
+            color: #6c757d;
         }
         
         /* Footer */
@@ -326,35 +378,44 @@ if ($isAdmin) {
             gap: 12px;
             z-index: 1000;
         }
-        .btn-action {
+
+        .btn-primary-custom,
+        .btn-secondary-custom {
             border: none;
             padding: 10px 24px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.2s;
+            border-radius: 50px;
+            transition: all 0.3s;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            line-height: 1.2;
+            cursor: pointer;
+            white-space: nowrap;
         }
-        .btn-back {
+
+        .btn-primary-custom {
+            background: linear-gradient(135deg, #FF6B35, #E85D2C);
+            color: white;
+        }
+
+        .btn-primary-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255,107,53,0.3);
+            color: white;
+        }
+
+        .btn-secondary-custom {
             background: #6c757d;
             color: white;
         }
-        .btn-back:hover {
+
+        .btn-secondary-custom:hover {
             background: #5a6268;
-            transform: translateY(-1px);
-            color: white;
-        }
-        .btn-print {
-            background: #c0392b;
-            color: white;
-        }
-        .btn-print:hover {
-            background: #a93226;
-            transform: translateY(-1px);
+            transform: translateY(-2px);
             color: white;
         }
         
@@ -413,10 +474,10 @@ if ($isAdmin) {
 <body>
     <!-- Button Container - Side by Side -->
     <div class="button-container">
-        <a href="<?= $back_url ?>" class="btn-action btn-back">
+        <a href="<?= $back_url ?>" class="btn-secondary-custom">
             <i class="fas fa-arrow-left"></i> Back
         </a>
-        <button class="btn-action btn-print" onclick="window.print()">
+        <button class="btn-primary-custom" onclick="window.print()">
             <i class="fas fa-print"></i> Print / Save as PDF
         </button>
     </div>
@@ -446,18 +507,18 @@ if ($isAdmin) {
                     <div class="info-row">
                         <div class="info-label">Status:</div>
                         <div class="info-value">
-                            <span class="status-badge <?= $is_approved ? 'status-approved' : 'status-pending' ?>">
-                                <?= $is_approved ? 'APPROVED' : 'PENDING VERIFICATION' ?>
+                            <span class="status-badge <?= $status_class ?>">
+                                <?= $status_label ?>
                             </span>
                         </div>
                     </div>
                     <div class="info-row">
                         <div class="info-label">Report Date:</div>
-                        <div class="info-value"><?= date('F d, Y') ?></div>
+                        <div class="info-value"><?= date('F d, Y', strtotime($report_timestamp)) ?></div>
                     </div>
                     <div class="info-row">
                         <div class="info-label">Report Time:</div>
-                        <div class="info-value"><?= date('h:i A') ?></div>
+                        <div class="info-value"><?= date('h:i A', strtotime($report_timestamp)) ?></div>
                     </div>
                 </div>
             </div>
@@ -586,7 +647,7 @@ if ($isAdmin) {
             
             <!-- Signature Section -->
             <div class="signature-section">
-                <div class="signature-card">
+                <div class="signature-card <?= $status_stamp_class ?>">
                     <h4>ADMINISTRATOR'S SIGNATURE</h4>
                     <?php if (!empty($admin_signature['image'])): ?>
                         <img src="<?= $admin_signature['image'] ?>" class="signature-image" alt="Admin Signature">
@@ -597,12 +658,8 @@ if ($isAdmin) {
                     <div class="signature-details">ID: <?= htmlspecialchars($admin_signature['id'] ?? 'N/A') ?></div>
                     <div class="signature-details">Position: <?= htmlspecialchars($admin_signature['position'] ?? 'Administrator') ?></div>
                     <div class="signature-details">Department: <?= htmlspecialchars($admin_signature['department'] ?? 'APSeM') ?></div>
-                    <div class="signature-details">Date: <?= date('F d, Y') ?></div>
-                    <?php if ($is_approved): ?>
-                        <div class="approved-stamp">✓ APPROVED</div>
-                    <?php else: ?>
-                        <div class="approved-stamp" style="color: #f39c12;">⏳ PENDING</div>
-                    <?php endif; ?>
+                    <div class="signature-details">Date: <?= date('F d, Y', strtotime($report_timestamp)) ?></div>
+                    <div class="approved-stamp <?= $status_stamp_class ?>"><?= htmlspecialchars($status_stamp) ?></div>
                 </div>
             </div>
             

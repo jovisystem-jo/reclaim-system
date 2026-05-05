@@ -1,9 +1,11 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/claim_status.php';
 requireLogin();
 
 $db = Database::getInstance()->getConnection();
+reclaimEnsureClaimStatusSchema($db);
 $userID = $_SESSION['userID'];
 
 // Handle Complete Reclaim Request
@@ -508,7 +510,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             
                             <!-- View Claim Report - ONLY for Completed claims (after user confirms reclaim) -->
                             <?php if($claim['status'] == 'completed'): ?>
-                                <a href="<?= $base_url ?>admin/view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary btn-action" target="_blank">
+                                <a href="<?= $base_url ?>admin/view-claim-report.php?id=<?= $claim['claim_id'] ?>" class="btn btn-primary btn-action">
                                     <i class="fas fa-file-pdf"></i> View Claim Report
                                 </a>
                             <?php endif; ?>
