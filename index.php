@@ -754,21 +754,33 @@ document.getElementById('imageUpload').addEventListener('change', function(e) {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
-        .then(data => {
-            if(data.success) {
-                window.location.href = '<?= $base_url ?>search.php?image_analysis=' + data.analysis_id;
-            } else {
-                alert('Image search failed: ' + (data.message || 'Please try again.'));
+        .then(async response => {
+            const text = await response.text();
+            let data;
+
+            try {
+                data = JSON.parse(text);
+            } catch (error) {
+                throw new Error(text || 'Unexpected server response.');
             }
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || 'Please try again.');
+            }
+
+            return data;
+        })
+        .then(data => {
+            window.location.href = '<?= $base_url ?>search.php?image_analysis=' + data.analysis_id;
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('An error occurred. Please try again.');
+            alert('Image search failed: ' + (error.message || 'Please try again.'));
         })
         .finally(() => {
             btn.innerHTML = originalText;
             btn.disabled = false;
+            document.getElementById('imageUpload').value = '';
         });
     }
 });

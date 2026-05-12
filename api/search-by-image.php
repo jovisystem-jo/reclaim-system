@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/functions.php';
 
 header('Content-Type: application/json');
 
@@ -11,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
     require_csrf_token();
 
     $uploadDir = __DIR__ . '/../assets/uploads/temp/';
+    $originalFileName = $_FILES['image']['name'] ?? '';
 
     // Security: validate by MIME type, cap size, and generate a random filename.
     $upload = secure_image_upload($_FILES['image'], $uploadDir, 'assets/uploads/temp');
@@ -28,6 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
             
             $httpCode = 0;
             $response = false;
+            $usedFallbackLabels = false;
 
             if ($imaggaApiKey !== '' && $imaggaApiSecret !== '') {
                 // Call Imagga API for tagging only when credentials are configured.
@@ -49,19 +52,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
             }
             
             if ($httpCode !== 200) {
-                // Fallback to filename-based keywords if API fails
-                $filename = pathinfo($upload['path'], PATHINFO_FILENAME);
-                $keywords = preg_split('/[_\-\.]/', strtolower($filename));
-                $commonItems = ['laptop', 'phone', 'wallet', 'keys', 'bag', 'book', 'id', 'card', 'glasses', 'watch'];
-                $extractedLabels = [];
-                foreach ($keywords as $keyword) {
-                    if (in_array($keyword, $commonItems) || strlen($keyword) > 3) {
-                        $extractedLabels[] = $keyword;
-                    }
-                }
-                if (empty($extractedLabels)) {
-                    $extractedLabels = ['item'];
-                }
+                // Fallback to the original client filename when remote tagging is unavailable.
+                $extractedLabels = extractImageSearchLabelsFromFilename($originalFileName);
+                $usedFallbackLabels = true;
             } else {
                 $result = json_decode($response, true);
                 $tags = $result['result']['tags'] ?? [];
@@ -69,14 +62,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
                 $extractedLabels = [];
                 foreach ($tags as $tag) {
                     if ($tag['confidence'] > 30) { // Only include tags with >30% confidence
-                        $extractedLabels[] = $tag['tag']['en'];
+                        $normalizedLabel = normalizeImageSearchLabel($tag['tag']['en'] ?? '');
+                        if (isMeaningfulImageLabel($normalizedLabel)) {
+                            $extractedLabels[] = $normalizedLabel;
+                        }
                     }
                 }
                 
                 if (empty($extractedLabels)) {
-                    $extractedLabels = ['item'];
+                    $extractedLabels = extractImageSearchLabelsFromFilename($originalFileName);
+                    $usedFallbackLabels = true;
                 }
             }
+
+            $extractedLabels = array_values(array_unique($extractedLabels));
             
             // Save analysis to database
             $db = Database::getInstance()->getConnection();
@@ -112,11 +111,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
                 $analysisId = $db->lastInsertId();
             }
             
+            $message = $usedFallbackLabels
+                ? (hasMeaningfulImageLabels($extractedLabels)
+                    ? 'Image uploaded successfully. Showing matches using available keywords.'
+                    : 'Image uploaded successfully. Showing the latest items because the image could not be classified clearly.')
+                : 'Image analyzed successfully! Found ' . count($extractedLabels) . ' labels.';
+
             echo json_encode([
                 'success' => true,
                 'analysis_id' => $analysisId,
                 'labels' => $extractedLabels,
-                'message' => 'Image analyzed successfully! Found ' . count($extractedLabels) . ' labels.'
+                'message' => $message
             ]);
             
         } catch (Exception $e) {

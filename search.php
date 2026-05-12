@@ -8,6 +8,7 @@ $search_results = [];
 $search_query = '';
 $total_results = 0;
 $visible_statuses = ['lost', 'found'];
+$image_search_notice = '';
 
 // Get filter values
 $search_query = $_GET['query'] ?? '';
@@ -36,21 +37,26 @@ if ($image_analysis_id > 0) {
     if ($analysis) {
         $labels = json_decode($analysis['labels'], true);
         if (is_array($labels) && !empty($labels)) {
-            $search_query = implode(' ', $labels);
-            // Build search conditions from detected labels
+            $meaningfulLabels = array_values(array_filter(array_map('normalizeImageSearchLabel', $labels), 'isMeaningfulImageLabel'));
+            $search_query = implode(' ', $meaningfulLabels);
+
+            // Build search conditions from detected labels when we have usable keywords.
             $labelConditions = [];
-            foreach ($labels as $label) {
-                if (strlen($label) > 2) {
-                    $labelConditions[] = "(title LIKE ? OR description LIKE ? OR category LIKE ? OR found_location LIKE ?)";
-                    $search_term = "%$label%";
-                    $params[] = $search_term;
-                    $params[] = $search_term;
-                    $params[] = $search_term;
-                    $params[] = $search_term;
-                }
+            foreach ($meaningfulLabels as $label) {
+                $labelConditions[] = "(title LIKE ? OR description LIKE ? OR category LIKE ? OR brand LIKE ? OR color LIKE ? OR found_location LIKE ?)";
+                $search_term = "%$label%";
+                $params[] = $search_term;
+                $params[] = $search_term;
+                $params[] = $search_term;
+                $params[] = $search_term;
+                $params[] = $search_term;
+                $params[] = $search_term;
             }
+
             if (!empty($labelConditions)) {
                 $sql .= " AND (" . implode(' OR ', $labelConditions) . ")";
+            } else {
+                $image_search_notice = 'We could not detect enough details from that image, so the latest items are shown below instead.';
             }
         }
     }
@@ -379,6 +385,9 @@ if ($image_analysis_id > 0) {
                         <span class="detected-label"><?= htmlspecialchars($label) ?></span>
                     <?php endforeach; endif; ?>
                 </div>
+                <?php if ($image_search_notice !== ''): ?>
+                    <p class="small text-muted mt-2 mb-0"><?= htmlspecialchars($image_search_notice) ?></p>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
 
@@ -503,17 +512,28 @@ document.getElementById('imageSearch').addEventListener('change', function(e) {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
-        .then(data => {
-            if(data.success) {
-                window.location.href = '<?= $base_url ?>search.php?image_analysis=' + data.analysis_id;
-            } else {
-                alert('Image search failed: ' + (data.message || 'Please try again.'));
+        .then(async response => {
+            const text = await response.text();
+            let data;
+
+            try {
+                data = JSON.parse(text);
+            } catch (error) {
+                throw new Error(text || 'Unexpected server response.');
             }
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || 'Please try again.');
+            }
+
+            return data;
+        })
+        .then(data => {
+            window.location.href = '<?= $base_url ?>search.php?image_analysis=' + data.analysis_id;
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('Image search failed. Please try again.');
+            alert('Image search failed: ' + (error.message || 'Please try again.'));
         })
         .finally(function() {
             btn.innerHTML = originalText;
