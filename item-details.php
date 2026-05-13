@@ -147,13 +147,35 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
                 </div>
                 <div class="card-body">
                     <?php
+                    $referenceTokens = extractItemTextMatchTokens($item, ['title', 'description', 'brand', 'color', 'found_location']);
                     $stmt = $db->prepare("
                         SELECT * FROM items 
-                        WHERE category = ? AND item_id != ? 
-                        ORDER BY reported_date DESC LIMIT 3
+                        WHERE category = ? AND item_id != ? AND status != 'returned'
+                        ORDER BY reported_date DESC LIMIT 20
                     ");
                     $stmt->execute([$item['category'], $id]);
                     $similar_items = $stmt->fetchAll();
+
+                    foreach ($similar_items as &$similarItem) {
+                        $similarItem['_similarity_score'] = calculateJaccardSimilarity(
+                            $referenceTokens,
+                            extractItemTextMatchTokens($similarItem, ['title', 'description', 'brand', 'color', 'found_location'])
+                        );
+                    }
+                    unset($similarItem);
+
+                    usort($similar_items, static function ($left, $right) {
+                        $leftScore = (float)($left['_similarity_score'] ?? 0.0);
+                        $rightScore = (float)($right['_similarity_score'] ?? 0.0);
+
+                        if ($leftScore === $rightScore) {
+                            return strcmp((string)($right['reported_date'] ?? ''), (string)($left['reported_date'] ?? ''));
+                        }
+
+                        return $rightScore <=> $leftScore;
+                    });
+
+                    $similar_items = array_slice($similar_items, 0, 3);
                     ?>
                     
                     <?php if(empty($similar_items)): ?>

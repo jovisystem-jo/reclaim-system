@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/mail.php';
+require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/imagga_similarity.php';
 
 class NotificationSystem {
     private $db;
@@ -234,7 +236,7 @@ class NotificationSystem {
      */
     public function notifySimilarFoundItemsForLostReport($lostItemId, $userId, $limit = 3) {
         $stmt = $this->db->prepare("
-            SELECT item_id, title, description, category, brand, color, found_location, date_found
+            SELECT item_id, title, description, category, brand, color, found_location, date_found, image_url
             FROM items
             WHERE item_id = ? AND status = 'lost' AND user_id = ?
             LIMIT 1
@@ -297,7 +299,7 @@ class NotificationSystem {
             FROM items
             WHERE status = 'found' AND category = ?
             ORDER BY reported_date DESC
-            LIMIT 50
+            LIMIT 75
         ");
         $stmt->execute([$lostItem['category']]);
         $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -306,52 +308,39 @@ class NotificationSystem {
             return [];
         }
 
-        $lostBrand = $this->normalizeMatchValue($lostItem['brand'] ?? '');
-        $lostColor = $this->normalizeMatchValue($lostItem['color'] ?? '');
-        $lostLocation = $this->normalizeMatchValue($lostItem['found_location'] ?? '');
-        $lostKeywords = $this->extractMatchKeywords(($lostItem['title'] ?? '') . ' ' . ($lostItem['description'] ?? ''));
+        $matchFields = ['title', 'description', 'brand', 'color', 'found_location'];
+        $lostTokens = extractItemTextMatchTokens($lostItem, $matchFields);
+        $imageScores = $this->getImaggaScoresForLostItem($lostItem, min(25, max(10, (int)$limit * 5)));
         $matches = [];
 
         foreach ($candidates as $candidate) {
-            $score = 0;
+            $candidateTokens = extractItemTextMatchTokens($candidate, $matchFields);
+            $textScore = calculateJaccardSimilarity($lostTokens, $candidateTokens);
+            $imageScore = (float)($imageScores[(int)($candidate['item_id'] ?? 0)] ?? 0.0);
+            $combinedScore = $this->combineMatchScores($textScore, $imageScore);
 
-            $candidateBrand = $this->normalizeMatchValue($candidate['brand'] ?? '');
-            $candidateColor = $this->normalizeMatchValue($candidate['color'] ?? '');
-            $candidateLocation = $this->normalizeMatchValue($candidate['found_location'] ?? '');
-            $candidateKeywords = $this->extractMatchKeywords(($candidate['title'] ?? '') . ' ' . ($candidate['description'] ?? ''));
-            $keywordOverlap = count(array_intersect($lostKeywords, $candidateKeywords));
-
-            if ($lostBrand !== '' && $candidateBrand !== '' && $lostBrand === $candidateBrand) {
-                $score += 4;
+            if (!$this->qualifiesAsSimilarFoundItem($textScore, $imageScore, $combinedScore)) {
+                continue;
             }
 
-            if ($lostColor !== '' && $candidateColor !== '' && $lostColor === $candidateColor) {
-                $score += 2;
-            }
-
-            if ($lostLocation !== '' && $candidateLocation !== '' && $lostLocation === $candidateLocation) {
-                $score += 1;
-            }
-
-            if ($keywordOverlap > 0) {
-                $score += min(4, $keywordOverlap);
-            }
-
-            $sameBrand = $lostBrand !== '' && $candidateBrand !== '' && $lostBrand === $candidateBrand;
-            $sameColor = $lostColor !== '' && $candidateColor !== '' && $lostColor === $candidateColor;
-            $isStrongKeywordMatch = $keywordOverlap >= 2;
-
-            if ($score >= 4 || $sameBrand || ($sameColor && $keywordOverlap >= 1) || $isStrongKeywordMatch) {
-                $candidate['_match_score'] = $score;
-                $matches[] = $candidate;
-            }
+            $candidate['_match_score'] = $combinedScore;
+            $candidate['_text_similarity'] = $textScore;
+            $candidate['_image_similarity'] = $imageScore;
+            $matches[] = $candidate;
         }
 
         usort($matches, function ($left, $right) {
-            $leftScore = $left['_match_score'] ?? 0;
-            $rightScore = $right['_match_score'] ?? 0;
+            $leftScore = (float)($left['_match_score'] ?? 0);
+            $rightScore = (float)($right['_match_score'] ?? 0);
 
             if ($leftScore === $rightScore) {
+                $leftImageScore = (float)($left['_image_similarity'] ?? 0);
+                $rightImageScore = (float)($right['_image_similarity'] ?? 0);
+
+                if ($leftImageScore !== $rightImageScore) {
+                    return $rightImageScore <=> $leftImageScore;
+                }
+
                 return strcmp((string) ($right['reported_date'] ?? ''), (string) ($left['reported_date'] ?? ''));
             }
 
@@ -362,39 +351,57 @@ class NotificationSystem {
     }
 
     /**
-     * Normalize text values before comparing them
+     * Pull Imagga similarity scores for candidate found items when the lost report has an image.
      */
-    private function normalizeMatchValue($value) {
-        $normalized = strtolower(trim((string) $value));
-
-        if ($normalized === '' || in_array($normalized, ['other', 'generic', 'no brand', 'not specified'], true)) {
-            return '';
+    private function getImaggaScoresForLostItem(array $lostItem, $limit = 15) {
+        try {
+            $imaggaMatches = findSimilarItemsWithImaggaForItem($this->db, $lostItem, [
+                'statuses' => ['found'],
+                'limit' => max(1, (int)$limit),
+            ]);
+        } catch (Throwable $e) {
+            error_log('Imagga similar-item lookup failed for lost item ' . (int)($lostItem['item_id'] ?? 0) . ': ' . $e->getMessage());
+            return [];
         }
 
-        return preg_replace('/\s+/', ' ', $normalized);
-    }
+        if (!$imaggaMatches['success']) {
+            return [];
+        }
 
-    /**
-     * Extract useful keywords for lightweight item similarity matching
-     */
-    private function extractMatchKeywords($text) {
-        $tokens = preg_split('/[^a-z0-9]+/i', strtolower((string) $text));
-        $stopWords = [
-            'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'has', 'item',
-            'lost', 'found', 'black', 'white', 'blue', 'red', 'green', 'other', 'than',
-            'into', 'onto', 'near', 'your', 'their', 'mine', 'ours', 'inside', 'outside'
-        ];
-        $keywords = [];
-
-        foreach ($tokens as $token) {
-            if ($token === '' || strlen($token) < 3 || in_array($token, $stopWords, true)) {
+        $scores = [];
+        foreach ($imaggaMatches['matched_items'] as $match) {
+            $itemId = (int)($match['item_id'] ?? 0);
+            if ($itemId <= 0) {
                 continue;
             }
 
-            $keywords[$token] = true;
+            $scores[$itemId] = max((float)($scores[$itemId] ?? 0.0), (float)($match['similarity_score'] ?? 0.0));
         }
 
-        return array_keys($keywords);
+        return $scores;
+    }
+
+    /**
+     * Blend text Jaccard similarity with Imagga image similarity when available.
+     */
+    private function combineMatchScores($textScore, $imageScore) {
+        $textScore = max(0.0, min(1.0, (float)$textScore));
+        $imageScore = max(0.0, min(1.0, (float)$imageScore));
+
+        if ($imageScore > 0.0) {
+            return round(($imageScore * 0.65) + ($textScore * 0.35), 6);
+        }
+
+        return round($textScore, 6);
+    }
+
+    /**
+     * Keep only meaningful matches so notifications stay useful.
+     */
+    private function qualifiesAsSimilarFoundItem($textScore, $imageScore, $combinedScore) {
+        return (float)$imageScore >= 0.45
+            || (float)$textScore >= 0.18
+            || (float)$combinedScore >= 0.25;
     }
     
     /**

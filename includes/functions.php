@@ -140,6 +140,84 @@ function hasMeaningfulImageLabels($labels) {
 }
 
 /**
+ * Normalize free-form text before token-based similarity matching.
+ */
+function normalizeTextMatchValue($value) {
+    $normalized = strtolower(trim((string) $value));
+    $normalized = preg_replace('/[^a-z0-9\s]+/', ' ', $normalized);
+    $normalized = preg_replace('/\s+/', ' ', $normalized);
+    return trim($normalized);
+}
+
+/**
+ * Extract unique tokens for Jaccard text similarity matching.
+ */
+function extractTextMatchTokens($text, array $extraStopWords = []) {
+    $tokens = preg_split('/\s+/', normalizeTextMatchValue($text)) ?: [];
+    $stopWords = array_fill_keys(array_merge([
+        'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has',
+        'have', 'in', 'into', 'is', 'it', 'its', 'item', 'items', 'lost', 'found',
+        'near', 'of', 'on', 'onto', 'or', 'our', 'ours', 'please', 'report',
+        'reported', 'that', 'the', 'their', 'them', 'there', 'these', 'this',
+        'those', 'to', 'was', 'were', 'with', 'your', 'yours'
+    ], array_map('strtolower', $extraStopWords)), true);
+    $unique = [];
+
+    foreach ($tokens as $token) {
+        if ($token === '' || strlen($token) < 2 || isset($stopWords[$token])) {
+            continue;
+        }
+
+        $unique[$token] = true;
+    }
+
+    return array_keys($unique);
+}
+
+/**
+ * Extract searchable tokens from an item record for text similarity scoring.
+ */
+function extractItemTextMatchTokens(array $item, array $fields = null) {
+    $fields = $fields ?: ['title', 'description', 'category', 'brand', 'color', 'found_location', 'location'];
+    $ignoredValues = [
+        'other', 'generic', 'no brand', 'not specified', 'n a', 'na', 'none', 'null'
+    ];
+    $segments = [];
+
+    foreach ($fields as $field) {
+        $value = normalizeTextMatchValue($item[$field] ?? '');
+        if ($value === '' || in_array($value, $ignoredValues, true)) {
+            continue;
+        }
+
+        $segments[] = $value;
+    }
+
+    return extractTextMatchTokens(implode(' ', $segments));
+}
+
+/**
+ * Calculate Jaccard similarity between two token sets.
+ */
+function calculateJaccardSimilarity(array $leftTokens, array $rightTokens) {
+    $left = array_fill_keys(array_values(array_unique(array_filter($leftTokens))), true);
+    $right = array_fill_keys(array_values(array_unique(array_filter($rightTokens))), true);
+
+    if (empty($left) || empty($right)) {
+        return 0.0;
+    }
+
+    $intersection = count(array_intersect_key($left, $right));
+    $union = count($left + $right);
+
+    if ($union === 0) {
+        return 0.0;
+    }
+
+    return round($intersection / $union, 6);
+}
+
+/**
  * Build a best-effort keyword list when remote image tagging is unavailable.
  */
 function extractImageSearchLabelsFromFilename($originalName) {

@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 requireLogin();
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/imagga_similarity.php';
 
 $db = Database::getInstance()->getConnection();
 $userID = $_SESSION['userID'];
@@ -27,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_item'])) {
     if ($item) {
         // Handle image upload if new image is provided
         $image_url = $item['image_url'];
+        $imageWasUpdated = false;
         
         if (isset($_FILES['edit_image']) && $_FILES['edit_image']['error'] !== UPLOAD_ERR_NO_FILE) {
             $uploadDir = __DIR__ . '/../assets/uploads/';
@@ -35,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_item'])) {
             if ($upload['success'] && !empty($upload['path'])) {
                 delete_uploaded_file_safely($item['image_url'], __DIR__ . '/../assets/uploads/');
                 $image_url = $upload['path'];
+                $imageWasUpdated = true;
             } elseif (!$upload['success']) {
                 $_SESSION['error_message'] = $upload['message'];
                 header('Location: ' . $_SERVER['PHP_SELF']);
@@ -50,6 +53,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_item'])) {
         ");
         
         if ($stmt->execute([$title, $category, $description, $location, $date_occurred, $status, $image_url, $item_id, $userID])) {
+            if ($imageWasUpdated && !empty($image_url)) {
+                try {
+                    $imaggaSync = syncItemImageToImaggaCollection($db, (int)$item_id, $image_url);
+                    if (!$imaggaSync['success'] && empty($imaggaSync['skipped'])) {
+                        error_log('Imagga item re-index failed for item ' . (int)$item_id . ': ' . ($imaggaSync['error'] ?? 'Unknown error'));
+                    }
+                } catch (Throwable $e) {
+                    error_log('Imagga item re-index exception for item ' . (int)$item_id . ': ' . $e->getMessage());
+                }
+            }
+
             $_SESSION['success_message'] = "Item updated successfully!";
         } else {
             $_SESSION['error_message'] = "Failed to update item.";

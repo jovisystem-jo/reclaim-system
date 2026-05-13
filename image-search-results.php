@@ -23,32 +23,77 @@ if (!$analysis) {
 }
 
 $labels = json_decode($analysis['labels'], true);
+$labels = is_array($labels) ? $labels : [];
 $image_url = $analysis['image_url'];
 
 // Search for matching items
-$searchTerms = [];
-foreach ($labels as $label) {
-    $searchTerms[] = "%$label%";
+$results = [];
+$matchedItemIds = [];
+$rawMatchedIds = $analysis['matched_item_ids'] ?? '';
+$decodedMatchedIds = json_decode((string)$rawMatchedIds, true);
+
+if (is_array($decodedMatchedIds)) {
+    foreach ($decodedMatchedIds as $matchedId) {
+        $matchedId = (int)$matchedId;
+        if ($matchedId > 0 && !in_array($matchedId, $matchedItemIds, true)) {
+            $matchedItemIds[] = $matchedId;
+        }
+    }
 }
 
-$sql = "SELECT * FROM items WHERE ";
-$conditions = [];
-$params = [];
-foreach ($labels as $label) {
-    $conditions[] = "(title LIKE ? OR description LIKE ? OR category LIKE ?)";
-    $term = "%$label%";
-    $params[] = $term;
-    $params[] = $term;
-    $params[] = $term;
-}
-$sql .= implode(' OR ', $conditions);
-$sql .= " ORDER BY reported_date DESC";
+if (!empty($matchedItemIds)) {
+    $placeholders = implode(',', array_fill(0, count($matchedItemIds), '?'));
+    $orderPlaceholders = implode(',', array_fill(0, count($matchedItemIds), '?'));
+    $stmt = $db->prepare("SELECT * FROM items WHERE item_id IN ($placeholders) ORDER BY FIELD(item_id, $orderPlaceholders)");
+    $stmt->execute(array_merge($matchedItemIds, $matchedItemIds));
+    $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} elseif (!empty($labels)) {
+    $normalizedLabels = array_values(array_filter(array_map('normalizeImageSearchLabel', $labels), 'isMeaningfulImageLabel'));
+    $labelTokens = extractTextMatchTokens(implode(' ', $normalizedLabels));
+    $conditions = [];
+    $params = [];
 
-$stmt = $db->prepare($sql);
-$stmt->execute($params);
-$results = $stmt->fetchAll();
+    foreach ($normalizedLabels as $label) {
+        $conditions[] = "(title LIKE ? OR description LIKE ? OR category LIKE ? OR brand LIKE ? OR color LIKE ? OR found_location LIKE ?)";
+        $term = '%' . $label . '%';
+        $params[] = $term;
+        $params[] = $term;
+        $params[] = $term;
+        $params[] = $term;
+        $params[] = $term;
+        $params[] = $term;
+    }
+
+    if (!empty($conditions)) {
+        $sql = "SELECT * FROM items WHERE status IN ('lost', 'found') AND (" . implode(' OR ', $conditions) . ") ORDER BY reported_date DESC LIMIT 50";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($results as &$item) {
+            $item['_image_match_score'] = calculateJaccardSimilarity($labelTokens, extractItemTextMatchTokens($item));
+        }
+        unset($item);
+
+        $results = array_values(array_filter($results, static function ($item) {
+            return (float)($item['_image_match_score'] ?? 0.0) > 0.0;
+        }));
+
+        usort($results, static function ($left, $right) {
+            $leftScore = (float)($left['_image_match_score'] ?? 0.0);
+            $rightScore = (float)($right['_image_match_score'] ?? 0.0);
+
+            if ($leftScore === $rightScore) {
+                return strcmp((string)($right['reported_date'] ?? ''), (string)($left['reported_date'] ?? ''));
+            }
+
+            return $rightScore <=> $leftScore;
+        });
+    }
+}
 
 $base_url = '/reclaim-system/';
+$analysisImageUrl = !empty($image_url) ? getImageUrl($image_url, $base_url) : '';
 ?>
 
 <div class="container content-wrapper">
@@ -60,7 +105,7 @@ $base_url = '/reclaim-system/';
             <div class="row">
                 <div class="col-md-4">
                     <div class="text-center">
-                        <img src="<?= $image_url ?>" class="img-fluid rounded" style="max-height: 200px;">
+                        <img src="<?= htmlspecialchars($analysisImageUrl) ?>" class="img-fluid rounded" style="max-height: 200px;">
                         <h6 class="mt-3">Detected Labels:</h6>
                         <div class="d-flex flex-wrap justify-content-center gap-2">
                             <?php foreach($labels as $label): ?>
@@ -82,8 +127,8 @@ $base_url = '/reclaim-system/';
                                     <div class="row g-0">
                                         <div class="col-md-4">
                                             <?php 
-                                            $hasImage = !empty($item['image_url']) && file_exists($item['image_url']);
-                                            $imgUrl = $hasImage ? $base_url . $item['image_url'] : '';
+                                            $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
+                                            $imgUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
                                             ?>
                                             <?php if($hasImage): ?>
                                                 <img src="<?= $imgUrl ?>" class="img-fluid rounded-start" style="height: 100px; width: 100%; object-fit: cover;">

@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 requireLogin();
 require_once __DIR__ . '/../includes/notification.php';
+require_once __DIR__ . '/../includes/imagga_similarity.php';
 
 // Determine report type from URL parameter
 $type = isset($_GET['type']) && $_GET['type'] === 'found' ? 'found' : 'lost';
@@ -162,6 +163,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
                 $itemID = $db->lastInsertId();
                 $similarFoundMatches = 0;
+
+                if (!empty($image_url)) {
+                    try {
+                        $imaggaSync = syncItemImageToImaggaCollection($db, (int)$itemID, $image_url);
+                        if (!$imaggaSync['success'] && empty($imaggaSync['skipped'])) {
+                            error_log('Imagga item indexing failed for item ' . (int)$itemID . ': ' . ($imaggaSync['error'] ?? 'Unknown error'));
+                        }
+                    } catch (Throwable $e) {
+                        error_log('Imagga item indexing exception for item ' . (int)$itemID . ': ' . $e->getMessage());
+                    }
+                }
                 
                 // Send notification to user
                 $notifTitle = $status == 'lost' ? "🔍 Lost Item Reported" : "📍 Found Item Reported";
