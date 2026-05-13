@@ -14,11 +14,18 @@ $error = '';
 $success = '';
 
 $base_url = '/reclaim-system/';
+$now = new DateTimeImmutable('now');
+$currentDate = $now->format('Y-m-d');
+$currentTime = $now->format('H:i');
+
+function hasDateTimeParseErrors($errors) {
+    return is_array($errors)
+        && (((int) ($errors['warning_count'] ?? 0)) > 0 || ((int) ($errors['error_count'] ?? 0)) > 0);
+}
 
 // Create uploads directory if not exists
 $uploadDir = __DIR__ . '/../assets/uploads/';
 if (!file_exists($uploadDir)) {
-    // Security: avoid world-writable upload directories.
     mkdir($uploadDir, 0755, true);
 }
 
@@ -69,19 +76,14 @@ $brands_by_category = [
         'Tiffany & Co.', 'Cartier', 'Pandora', 'Swarovski', 'David Yurman', 'Bvlgari', 'Van Cleef & Arpels',
         'Chanel', 'Dior', 'Gucci', 'Rolex', 'Omega', 'Seiko', 'Citizen', 'Casio', 'Other'
     ],
-    'Household' => [
-        'Other'
-    ],
-    'Others' => [
-        'Generic', 'No Brand', 'Custom Made', 'Handmade', 'Vintage', 'Limited Edition', 'Other'
-    ]
+    'Household' => ['Other'],
+    'Others' => ['Generic', 'No Brand', 'Custom Made', 'Handmade', 'Vintage', 'Limited Edition', 'Other']
 ];
 
 // Common colors
 $common_colors = [
     'Black', 'White', 'Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Pink',
-    'Orange', 'Brown', 'Grey', 'Silver', 'Gold', 'Navy', 'Beige', 'Multicolor',
-    'Other'
+    'Orange', 'Brown', 'Grey', 'Silver', 'Gold', 'Navy', 'Beige', 'Multicolor', 'Other'
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -124,7 +126,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Handle image upload
     $image_url = '';
     if (isset($_FILES['image']) && $_FILES['image']['error'] !== UPLOAD_ERR_NO_FILE) {
-        // Security: validate real MIME type, size, and use a random server filename.
         $upload = secure_image_upload($_FILES['image'], $uploadDir, 'assets/uploads');
         if ($upload['success']) {
             $image_url = $upload['path'];
@@ -138,14 +139,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Validate required fields
     if ($type === 'lost') {
-        // For lost items: location is required
         if (empty($title) || empty($category) || empty($description) || empty($location_found) || empty($date_occurred)) {
             $error = 'Please fill in all required fields (Title, Category, Description, Location, and Date)';
         }
     } else {
-        // For found items: location is now required (for admin visibility)
         if (empty($title) || empty($category) || empty($description) || empty($date_occurred) || empty($location_found)) {
             $error = 'Please fill in all required fields (Title, Category, Description, Location, and Date)';
+        }
+    }
+
+    if (empty($error) && !empty($date_occurred)) {
+        $submittedDate = DateTimeImmutable::createFromFormat('!Y-m-d', $date_occurred);
+        $dateErrors = DateTimeImmutable::getLastErrors();
+
+        if (!$submittedDate || hasDateTimeParseErrors($dateErrors)) {
+            $error = 'Please select a valid date.';
+        } elseif ($submittedDate->format('Y-m-d') > $currentDate) {
+            $error = 'Please select the current date or a past date.';
+        } elseif (!empty($time_occurred)) {
+            $submittedDateTime = DateTimeImmutable::createFromFormat('Y-m-d H:i', $date_occurred . ' ' . $time_occurred);
+            $dateTimeErrors = DateTimeImmutable::getLastErrors();
+
+            if (!$submittedDateTime || hasDateTimeParseErrors($dateTimeErrors)) {
+                $error = 'Please select a valid time.';
+            } elseif ($submittedDate->format('Y-m-d') === $currentDate && $submittedDateTime > $now) {
+                $error = 'Please select the current time or a past time.';
+            }
         }
     }
     
@@ -157,13 +176,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ");
             
-            // Store location_found for both lost and found items
             $location_value = $location_found;
             
             if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
                 $itemID = $db->lastInsertId();
                 $similarFoundMatches = 0;
-
+                // Upload to Imagga if image exists
                 if (!empty($image_url)) {
                     try {
                         $imaggaSync = syncItemImageToImaggaCollection($db, (int)$itemID, $image_url);
@@ -176,8 +194,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 // Send notification to user
-                $notifTitle = $status == 'lost' ? "🔍 Lost Item Reported" : "📍 Found Item Reported";
+                $notifTitle = $status == 'lost' ? 'Lost Item Reported' : 'Found Item Reported';
                 $notifMessage = "You have successfully reported a {$status} item: '{$title}'.";
+                
+                if ($similarFoundMatches > 0) {
+                    $notifMessage .= "\n\nWe found {$similarFoundMatches} similar item" . ($similarFoundMatches === 1 ? '' : 's') . ' and sent you a notification.';
+                }
                 $notification->send($_SESSION['userID'], $notifTitle, $notifMessage, 'success');
                 
                 if ($status == 'lost') {
@@ -187,6 +209,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!empty($image_url)) {
                         $success .= ' Image uploaded successfully.';
                     }
+                    
                     $similarFoundMatches = $notification->notifySimilarFoundItemsForLostReport((int) $itemID, (int) $_SESSION['userID']);
                     if ($similarFoundMatches > 0) {
                         $success .= ' We found ' . $similarFoundMatches . ' similar found item' . ($similarFoundMatches === 1 ? '' : 's') . ' and sent you a notification.';
@@ -198,9 +221,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!empty($image_url)) {
                         $success .= ' Image uploaded successfully.';
                     }
-                    $success .= '<br><strong>🏢 Keep at:</strong> ' . htmlspecialchars($delivery_location);
+                    $success .= '<br><strong>Keep at:</strong> ' . htmlspecialchars($delivery_location);
                 }
                 
+                // Add similar items to success message
                 $_POST = [];
             } else {
                 $error = 'Failed to report item. Please try again.';
@@ -211,6 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
 if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     define('RECLAIM_EMBEDDED_LAYOUT', true);
 }
@@ -233,11 +258,9 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             border-radius: 15px;
             margin-bottom: 20px;
         }
-
         .content-wrapper {
-            margin-top: 20px; /* adjust: 20px–40px */
+            margin-top: 20px;
         }
-        
         .form-section-title {
             font-weight: 700;
             margin-bottom: 20px;
@@ -363,12 +386,8 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         .alert { border-radius: 12px; border: none; }
         .alert-success { background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%); color: #1e7e34; }
         .alert-danger { background: #ffebee; color: #c62828; }
-        .other-input {
-            margin-top: 8px;
-        }
-        .brand-select {
-            transition: all 0.3s;
-        }
+        .other-input { margin-top: 8px; }
+        .brand-select { transition: all 0.3s; }
     </style>
 </head>
 <body class="app-page user-page">
@@ -390,7 +409,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
                         <?php endif; ?>
                         <?php if($success): ?>
-                            <div class="alert alert-success"><?= $success ?> <a href="<?= $base_url ?>user/dashboard.php" class="alert-link">Go to Dashboard</a></div>
+                            <div class="alert alert-success"><?= $success ?></div>
                         <?php endif; ?>
                         
                         <form method="POST" action="" enctype="multipart/form-data" id="reportForm">
@@ -426,13 +445,12 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                                         </select>
                                     </div>
                                     
-                                    <!-- Location Field - Required for both Lost and Found items -->
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label required-field">Location Where <?= $type === 'lost' ? 'Lost' : 'Found' ?></label>
                                         <input type="text" name="location" class="form-control" required 
                                                placeholder="e.g., Library, G3, Cafeteria, etc." 
                                                value="<?= htmlspecialchars($_POST['location'] ?? '') ?>">
-                                        <small class="text-muted">This information will only be visible to administrators for security purposes.</small>
+                                        <small class="text-muted">This information helps us verify ownership.</small>
                                     </div>
                                 </div>
                                 
@@ -480,12 +498,14 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label required-field">Date <?= $type === 'lost' ? 'Lost' : 'Found' ?></label>
                                         <input type="date" name="date_occurred" class="form-control" required 
-                                               value="<?= htmlspecialchars($_POST['date_occurred'] ?? date('Y-m-d')) ?>">
+                                               value="<?= htmlspecialchars($_POST['date_occurred'] ?? $currentDate) ?>"
+                                               max="<?= $currentDate ?>">
                                     </div>
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label">Approximate Time</label>
                                         <input type="time" name="time_occurred" class="form-control" 
-                                               value="<?= htmlspecialchars($_POST['time_occurred'] ?? '') ?>">
+                                               value="<?= htmlspecialchars($_POST['time_occurred'] ?? '') ?>"
+                                               step="60">
                                     </div>
                                 </div>
                             </div>
@@ -522,13 +542,13 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             <?php endif; ?>
                             
                             <div class="form-section">
-                                <h5 class="form-section-title"><i class="fas fa-camera me-2"></i>Photo (Optional)</h5>
+                                <h5 class="form-section-title"><i class="fas fa-camera me-2"></i>Photo (Optional but Recommended)</h5>
                                 
                                 <div class="image-upload-container" id="imageUploadContainer" onclick="document.getElementById('imageInput').click()">
                                     <div class="image-upload-content">
                                         <i class="fas fa-camera fa-3x" style="color: #FF6B35;"></i>
                                         <p class="mb-0 mt-2">Click to upload an image of the item</p>
-                                        <small class="text-muted">Uploading a photo increases chances of recovery</small>
+                                        <small class="text-muted">Uploading a photo helps people recognize the item more easily</small>
                                     </div>
                                     <img class="uploaded-image-preview" id="uploadedImagePreview" alt="Uploaded image">
                                     <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="removeImage(event)">
@@ -536,6 +556,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                                     </button>
                                     <input type="file" id="imageInput" name="image" accept="image/*" style="display: none;">
                                 </div>
+                                <small class="text-muted d-block mt-2"><i class="fas fa-info-circle"></i> Use a clear photo so the item details are easier to verify.</small>
                             </div>
                             
                             <div class="d-grid gap-2 mt-3">
@@ -554,16 +575,13 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     </div>
     
     <script>
-        // Category-brand mapping
         const brandsByCategory = <?= json_encode($brands_by_category) ?>;
         
-        // Update brand dropdown based on selected category
         function updateBrands() {
             const category = document.getElementById('category').value;
             const brandSelect = document.getElementById('brand');
             const brandOtherDiv = document.getElementById('brand_other_div');
             
-            // Clear current options
             brandSelect.innerHTML = '<option value="">Select Brand (Optional)</option>';
             
             if (category && brandsByCategory[category]) {
@@ -576,13 +594,11 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                 });
             }
             
-            // Reset brand selection
             brandSelect.value = '';
             brandOtherDiv.style.display = 'none';
             document.querySelector('input[name="brand_other"]').value = '';
         }
         
-        // Brand "Other" toggle
         const brandSelect = document.getElementById('brand');
         const brandOtherDiv = document.getElementById('brand_other_div');
         
@@ -596,7 +612,6 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             }
         }
         
-        // Color "Other" toggle
         const colorSelect = document.getElementById('color');
         const colorOtherDiv = document.getElementById('color_other_div');
         
@@ -608,23 +623,16 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             }
         }
         
-        // Event listeners
-        document.getElementById('category').addEventListener('change', function() {
-            updateBrands();
-        });
-        
+        document.getElementById('category').addEventListener('change', updateBrands);
         brandSelect.addEventListener('change', toggleBrandOther);
         colorSelect.addEventListener('change', toggleColorOther);
         
-        // Initialize on page load
         updateBrands();
         toggleColorOther();
         
-        // Image upload functionality
         const imageUploadContainer = document.getElementById('imageUploadContainer');
         const imageInput = document.getElementById('imageInput');
         const uploadedImagePreview = document.getElementById('uploadedImagePreview');
-        const removeImageBtn = document.getElementById('removeImageBtn');
         
         imageInput.addEventListener('change', function(e) {
             if(e.target.files.length > 0) {
@@ -647,8 +655,6 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
             imageUploadContainer.classList.remove('has-image');
         }
         
-        removeImageBtn.addEventListener('click', removeImage);
-        
         <?php if ($type === 'found'): ?>
         const deliverySelect = document.getElementById('delivery_option');
         const otherDiv = document.getElementById('other_location_div');
@@ -666,6 +672,101 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         deliverySelect.addEventListener('change', toggleOtherLocation);
         toggleOtherLocation();
         <?php endif; ?>
+        
+        // Date and time validation
+        const dateInput = document.querySelector('input[name="date_occurred"]');
+        const timeInput = document.querySelector('input[name="time_occurred"]');
+        const reportForm = document.getElementById('reportForm');
+
+        function padTimeValue(value) {
+            return String(value).padStart(2, '0');
+        }
+
+        function getLocalDateString(date = new Date()) {
+            return `${date.getFullYear()}-${padTimeValue(date.getMonth() + 1)}-${padTimeValue(date.getDate())}`;
+        }
+
+        function getLocalTimeString(date = new Date()) {
+            return `${padTimeValue(date.getHours())}:${padTimeValue(date.getMinutes())}`;
+        }
+
+        function syncOccurredDateTimeLimits() {
+            if (!dateInput) {
+                return;
+            }
+
+            const now = new Date();
+            const today = getLocalDateString(now);
+            dateInput.setAttribute('max', today);
+
+            if (!timeInput) {
+                return;
+            }
+
+            if (dateInput.value === today) {
+                const currentTime = getLocalTimeString(now);
+                timeInput.setAttribute('max', currentTime);
+
+                if (timeInput.value && timeInput.value > currentTime) {
+                    timeInput.value = currentTime;
+                }
+            } else {
+                timeInput.removeAttribute('max');
+            }
+        }
+
+        function validateOccurredDateTime() {
+            if (!dateInput) {
+                return true;
+            }
+
+            syncOccurredDateTimeLimits();
+            dateInput.setCustomValidity('');
+
+            if (timeInput) {
+                timeInput.setCustomValidity('');
+            }
+
+            if (dateInput.max && dateInput.value && dateInput.value > dateInput.max) {
+                dateInput.setCustomValidity('Please select the current date or a past date.');
+                dateInput.reportValidity();
+                return false;
+            }
+
+            if (
+                timeInput
+                && dateInput.value
+                && dateInput.max
+                && dateInput.value === dateInput.max
+                && timeInput.max
+                && timeInput.value
+                && timeInput.value > timeInput.max
+            ) {
+                timeInput.setCustomValidity('Please select the current time or a past time.');
+                timeInput.reportValidity();
+                return false;
+            }
+
+            return true;
+        }
+
+        if (dateInput) {
+            syncOccurredDateTimeLimits();
+            dateInput.addEventListener('change', validateOccurredDateTime);
+        }
+
+        if (timeInput) {
+            timeInput.addEventListener('focus', syncOccurredDateTimeLimits);
+            timeInput.addEventListener('input', validateOccurredDateTime);
+        }
+
+        if (reportForm) {
+            reportForm.addEventListener('submit', function(event) {
+                if (!validateOccurredDateTime()) {
+                    event.preventDefault();
+                }
+            });
+        }
     </script>
     
     </main>

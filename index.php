@@ -480,15 +480,7 @@ require_once 'includes/header.php';
                     </form>
                 </div>
                 
-                <div class="mt-3">
-                    <small class="opacity-75">
-                        <i class="fas fa-camera me-1"></i> 
-                        <a href="#" onclick="document.getElementById('imageUpload').click(); return false;" class="text-white text-decoration-none">
-                            Search by image instead
-                        </a>
-                        <input type="file" id="imageUpload" accept="image/*" style="display: none;">
-                    </small>
-                </div>
+               
             </div>
             <div class="col-lg-5 d-none d-lg-block">
                 <div class="text-center">

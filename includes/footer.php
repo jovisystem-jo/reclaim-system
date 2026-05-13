@@ -10,8 +10,9 @@
                 <div class="col-lg-4 col-md-6">
                     <h5>Quick Links</h5>
                     <ul class="list-unstyled">
-                        <li><a href="/reclaim-system/">Home</a></li>
-                        <li><a href="/reclaim-system/search.php">Search Items</a></li>
+                        <li><a href="/reclaim-system/"><i class="fas fa-home me-2"></i>Home</a></li>
+                        <li><a href="/reclaim-system/search.php"><i class="fas fa-search me-2"></i>Search Items</a></li>
+                        <li><a href="/reclaim-system/contact-us.php"><i class="fas fa-envelope me-2"></i>Contact Us</a></li>
                         <?php if(!isset($_SESSION['userID'])): ?>
                             <li><a href="/reclaim-system/register.php">Register</a></li>
                             <li><a href="/reclaim-system/login.php">Login</a></li>

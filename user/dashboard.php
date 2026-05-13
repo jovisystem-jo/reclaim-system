@@ -6,7 +6,7 @@ requireLogin();
 $db = Database::getInstance()->getConnection();
 $userID = $_SESSION['userID'];
 
-// Get user statistics - FIXED: Use correct column names
+// Get user statistics
 $stmt = $db->prepare("
     SELECT
         (SELECT COUNT(*) FROM items WHERE reported_by = ?) as my_reports,
@@ -16,12 +16,12 @@ $stmt = $db->prepare("
 $stmt->execute([$userID, $userID, $userID]);
 $stats = $stmt->fetch();
 
-// Get recent notifications - FIXED: Use user_id instead of userID
+// Get recent notifications
 $stmt = $db->prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 10");
 $stmt->execute([$userID]);
 $notifications = $stmt->fetchAll();
 
-// Get unread count - FIXED: Use user_id instead of userID
+// Get unread count
 $stmt = $db->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
 $stmt->execute([$userID]);
 $unread_count = $stmt->fetchColumn();
@@ -58,9 +58,8 @@ $base_url = '/reclaim-system/';
         .report-card:hover {
             transform: translateY(-5px);
         }
-
         .content-wrapper {
-            margin-top: 20px; /* adjust: 20px–40px */
+            margin-top: 20px;
         }
         .report-card i {
             font-size: 48px;
@@ -126,8 +125,6 @@ $base_url = '/reclaim-system/';
             margin: 30px 0 20px 0;
             color: #333;
         }
-
-        /* Item Card Styles - Matching index.php */
         .item-card {
             transition: transform 0.2s, box-shadow 0.2s;
             border-radius: 12px;
@@ -152,7 +149,6 @@ $base_url = '/reclaim-system/';
         .item-card .card-body {
             padding: 15px;
         }
-        /* Fix for badge alignment */
         .item-card .d-flex {
             display: flex !important;
             justify-content: space-between !important;
@@ -176,24 +172,11 @@ $base_url = '/reclaim-system/';
             font-size: 11px;
             font-weight: bold;
             color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 60px;
         }
-
-        .status-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        min-width: 60px;
-        padding: 3px 8px;
-        border-radius: 20px;
-        white-space: nowrap;
-        text-align: center;
-        font-size: 0.75rem !important;
-        font-weight: 500;
-        line-height: 1.2;
-        color: white;
-        }
-
         .badge-lost { background-color: #dc3545; }
         .badge-found { background-color: #28a745; }
         .badge-returned { background-color: #17a2b8; }
@@ -234,8 +217,6 @@ $base_url = '/reclaim-system/';
         .quick-nav-buttons .btn i {
             line-height: 1;
         }
-
-        /* Notification Styles */
         .notification-list {
             max-height: 400px;
             overflow-y: auto;
@@ -405,12 +386,13 @@ $base_url = '/reclaim-system/';
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start">
                                 <h6 class="card-title"><?= htmlspecialchars(substr($item['title'] ?? $item['description'], 0, 60)) ?>...</h6>
-                                <span class="status-badge <?= ($item['status'] ?? 'found') == 'lost' ? 'badge-lost' : (($item['status'] ?? 'found') == 'returned' ? 'badge-returned' : 'badge-found') ?>">
+                                <span class="status-badge <?= ($item['status'] ?? 'found') == 'lost' ? 'badge-lost' : 'badge-found' ?>">
                                     <?= ucfirst($item['status'] ?? 'found') ?>
                                 </span>
                             </div>
                             <div class="item-meta">
                                 <div class="item-meta-row">
+                                    <i class="fas fa-map-marker-alt"></i>
                                     <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?></span>
                                 </div>
                                 <div class="item-meta-row">
@@ -526,24 +508,19 @@ $base_url = '/reclaim-system/';
                     </div>
                     <div class="card-body">
                         <div class="row quick-nav-buttons">
-                            <div class="col-md-3 mb-2">
+                            <div class="col-md-4 mb-2">
                                 <a href="<?= $base_url ?>search.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-search"></i> Search for Items
                                 </a>
                             </div>
-                            <div class="col-md-3 mb-2">
+                            <div class="col-md-4 mb-2">
                                 <a href="<?= $base_url ?>user/my-claims.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-file-alt"></i> View My Claims
                                 </a>
                             </div>
-                            <div class="col-md-3 mb-2">
+                            <div class="col-md-4 mb-2">
                                 <a href="<?= $base_url ?>user/user-profile.php" class="btn btn-outline-primary w-100 text-center">
                                     <i class="fas fa-user"></i> My Profile
-                                </a>
-                            </div>
-                            <div class="col-md-3 mb-2">
-                                <a href="<?= $base_url ?>user/dashboard.php" class="btn btn-outline-primary w-100 text-center">
-                                    <i class="fas fa-tachometer-alt"></i> Dashboard
                                 </a>
                             </div>
                         </div>

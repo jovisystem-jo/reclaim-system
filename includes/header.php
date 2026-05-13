@@ -284,10 +284,19 @@ $body_classes = implode(' ', [
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link <?= $current_page === 'index.php' ? 'active' : '' ?>" href="<?= $base_url ?>">Home</a>
+                        <a class="nav-link <?= $current_page === 'index.php' ? 'active' : '' ?>" href="<?= $base_url ?>">
+                            <i class="fas fa-home"></i> Home
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link <?= $current_page === 'search.php' ? 'active' : '' ?>" href="<?= $base_url ?>search.php">Search</a>
+                        <a class="nav-link <?= $current_page === 'search.php' ? 'active' : '' ?>" href="<?= $base_url ?>search.php">
+                            <i class="fas fa-search"></i> Search
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $current_page === 'contact-us.php' ? 'active' : '' ?>" href="<?= $base_url ?>contact-us.php">
+                            <i class="fas fa-envelope"></i> Contact Us
+                        </a>
                     </li>
                     <?php if(isset($_SESSION['userID'])): ?>
                         <?php if($is_admin_user): ?>
