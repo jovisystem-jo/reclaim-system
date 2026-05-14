@@ -314,18 +314,64 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         .complete-modal-body {
             padding: 20px;
         }
+        .complete-modal-question {
+            font-size: 1.15rem;
+            color: #4f6274;
+        }
+        .complete-reminder-section {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: max-height 0.35s ease, opacity 0.25s ease, transform 0.25s ease, margin-top 0.35s ease;
+            margin-top: 0;
+        }
+        .complete-reminder-section.is-visible {
+            max-height: 700px;
+            opacity: 1;
+            transform: translateY(0);
+            margin-top: 18px;
+        }
         .reminder-list {
             background: #f8f9fa;
             border-radius: 10px;
             padding: 15px;
-            margin: 15px 0;
+            margin: 0;
         }
         .reminder-list ul {
             margin: 10px 0 0 20px;
         }
+        .reminder-list > ul {
+            display: none;
+        }
         .reminder-list li {
             margin-bottom: 8px;
             font-size: 14px;
+        }
+        .clean-reminders ul {
+            margin: 10px 0 0 20px;
+        }
+        .complete-reminder-intro {
+            font-size: 0.92rem;
+            color: #6c757d;
+            margin-bottom: 12px;
+        }
+        .complete-acknowledgement {
+            margin-top: 14px;
+            padding: 12px 14px;
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+        }
+        .complete-acknowledgement .form-check-label {
+            font-size: 0.92rem;
+            color: #495057;
+        }
+        .complete-modal-footer {
+            gap: 10px;
+        }
+        .complete-modal-footer form {
+            margin: 0;
         }
         
         @media (max-width: 768px) {
@@ -557,7 +603,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     </div>
     </main>
     
-    <!-- Complete Reclaim Modal with Reminder -->
+    <!-- Complete Reclaim Modal with Staged Confirmation -->
     <div class="modal fade" id="completeModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -569,10 +615,22 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                     <div class="text-center mb-3">
                         <i class="fas fa-check-circle fa-4x" style="color: #27AE60;"></i>
                     </div>
-                    <p class="text-center mb-3"><strong>Have you received your item?</strong></p>
+                    <p class="text-center mb-0 complete-modal-question"><strong>Have you received your item?</strong></p>
                     
-                    <div class="reminder-list">
-                        <p><i class="fas fa-info-circle me-2" style="color: #FF6B35;"></i> <strong>Important Reminders:</strong></p>
+                    <div id="completeReminderSection" class="complete-reminder-section">
+                        <div class="reminder-list">
+                            <p class="complete-reminder-intro">Please review these reminders before finishing your reclaim confirmation.</p>
+                            <p class="mb-2"><i class="fas fa-info-circle me-2" style="color: #FF6B35;"></i> <strong>Important Reminders:</strong></p>
+                            <div class="clean-reminders">
+                                <ul>
+                                    <li>After confirmation, your claim will be marked as <strong>COMPLETED</strong>.</li>
+                                    <li>You will receive a notification confirming the successful reclaim.</li>
+                                    <li>The item status will be updated to <strong>RETURNED</strong>.</li>
+                                    <li>You will be able to <strong>view the claim report</strong> after confirmation.</li>
+                                    <li>The "Confirm Reclaim" button will be replaced with "View Claim Report".</li>
+                                    <li>This action <strong>cannot be undone</strong>.</li>
+                                </ul>
+                            </div>
                         <ul>
                             <li>✓ After confirmation, your claim will be marked as <strong>COMPLETED</strong></li>
                             <li>✓ You will receive a notification confirming the successful reclaim</li>
@@ -581,18 +639,28 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             <li>✓ The "Confirm Reclaim" button will be replaced with "View Claim Report"</li>
                             <li>✓ This action <strong>cannot be undone</strong></li>
                         </ul>
-                    </div>
-                    
-                    <div class="alert alert-info">
-                        <i class="fas fa-file-pdf me-2"></i>
-                        <strong>Note:</strong> After confirming, you will be able to access the Claim Report from your claims list.
+                            <div class="form-check complete-acknowledgement">
+                                <input class="form-check-input" type="checkbox" id="completeAcknowledgement">
+                                <label class="form-check-label" for="completeAcknowledgement">
+                                    I understand that this will complete my claim and cannot be undone.
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-footer">
+                <div class="modal-footer complete-modal-footer">
                     <button type="button" class="btn btn-secondary claims-btn" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-success claims-btn" id="confirmCompleteBtn">
+                    <button type="button" class="btn btn-success claims-btn" id="revealRemindersBtn">
                         <i class="fas fa-check me-2"></i> Yes, I have received the item
                     </button>
+                    <form method="POST" action="">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="complete_claim" value="1">
+                        <input type="hidden" name="claim_id" id="complete_claim_id">
+                        <button type="submit" class="btn btn-success claims-btn d-none" id="finalConfirmBtn" disabled>
+                            <i class="fas fa-check-double me-2"></i> Confirm Reclaim
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -624,11 +692,35 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     </div>
     
     <script>
-    let currentClaimId = null;
+    const completeModalElement = document.getElementById('completeModal');
+    const revealRemindersBtn = document.getElementById('revealRemindersBtn');
+    const reminderSection = document.getElementById('completeReminderSection');
+    const acknowledgementCheckbox = document.getElementById('completeAcknowledgement');
+    const finalConfirmBtn = document.getElementById('finalConfirmBtn');
+    const completeClaimIdInput = document.getElementById('complete_claim_id');
+
+    function resetCompleteModalState() {
+        if (reminderSection) {
+            reminderSection.classList.remove('is-visible');
+        }
+        if (acknowledgementCheckbox) {
+            acknowledgementCheckbox.checked = false;
+        }
+        if (finalConfirmBtn) {
+            finalConfirmBtn.disabled = true;
+            finalConfirmBtn.classList.add('d-none');
+        }
+        if (revealRemindersBtn) {
+            revealRemindersBtn.classList.remove('d-none');
+        }
+    }
     
     function openCompleteModal(claimId) {
-        currentClaimId = claimId;
-        const modal = new bootstrap.Modal(document.getElementById('completeModal'));
+        if (completeClaimIdInput) {
+            completeClaimIdInput.value = claimId;
+        }
+        resetCompleteModalState();
+        const modal = new bootstrap.Modal(completeModalElement);
         modal.show();
     }
     
@@ -637,18 +729,27 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
         const modal = new bootstrap.Modal(document.getElementById('cancelModal'));
         modal.show();
     }
-    
-    document.getElementById('confirmCompleteBtn').addEventListener('click', function() {
-        if (currentClaimId) {
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '';
-            form.innerHTML = '<?= csrf_field() ?>' +
-                '<input type="hidden" name="complete_claim" value="1">' +
-                '<input type="hidden" name="claim_id" value="' + currentClaimId + '">';
-            document.body.appendChild(form);
-            form.submit();
+
+    revealRemindersBtn.addEventListener('click', function() {
+        reminderSection.classList.add('is-visible');
+        revealRemindersBtn.classList.add('d-none');
+        finalConfirmBtn.classList.remove('d-none');
+        finalConfirmBtn.disabled = !acknowledgementCheckbox.checked;
+
+        window.setTimeout(function() {
+            reminderSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 150);
+    });
+
+    acknowledgementCheckbox.addEventListener('change', function() {
+        finalConfirmBtn.disabled = !this.checked;
+    });
+
+    completeModalElement.addEventListener('hidden.bs.modal', function() {
+        if (completeClaimIdInput) {
+            completeClaimIdInput.value = '';
         }
+        resetCompleteModalState();
     });
     
     // Auto-hide alerts after 5 seconds

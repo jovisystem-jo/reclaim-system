@@ -35,8 +35,8 @@ if (!$item) {
     exit();
 }
 
-// Get claim count for this item
-$stmt = $db->prepare("SELECT COUNT(*) FROM claim_requests WHERE item_id = ? AND status = 'approved'");
+// Get total submitted claims for this item
+$stmt = $db->prepare("SELECT COUNT(*) FROM claim_requests WHERE item_id = ?");
 $stmt->execute([$id]);
 $claim_count = $stmt->fetchColumn();
 
