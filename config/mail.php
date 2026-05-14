@@ -29,7 +29,9 @@ class MailConfig {
         // Set timeout to prevent hanging
         self::$mailer->Timeout = 30;
         
-        self::$mailer->setFrom('noreply@reclaim.com', 'Reclaim System');
+        $fromEmail = getenv('MAIL_FROM_EMAIL') ?: (self::$mailer->Username ?: 'noreply@reclaim.com');
+        $fromName = getenv('MAIL_FROM_NAME') ?: 'Reclaim System';
+        self::$mailer->setFrom($fromEmail, $fromName);
         return self::$mailer;
     }
     

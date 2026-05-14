@@ -58,6 +58,19 @@ function secureSessionStart() {
     ini_set('session.cookie_samesite', 'Lax');
     ini_set('session.cookie_secure', $isHttps ? '1' : '0');
 
+    $savePath = (string) ini_get('session.save_path');
+    $normalizedSavePath = trim(explode(';', $savePath)[0] ?? '');
+
+    if ($normalizedSavePath === '' || !is_dir($normalizedSavePath) || !is_writable($normalizedSavePath)) {
+        $fallbackPath = __DIR__ . '/../storage/sessions';
+        if (!is_dir($fallbackPath)) {
+            mkdir($fallbackPath, 0755, true);
+        }
+        if (is_dir($fallbackPath) && is_writable($fallbackPath)) {
+            session_save_path($fallbackPath);
+        }
+    }
+
     session_start();
 }
 

@@ -1,0 +1,11 @@
+<resources>
+    <color name="reclaim_orange">#FF8C00</color>
+    <color name="reclaim_orange_dark">#E85D2C</color>
+    <color name="reclaim_surface">#FFF8F0</color>
+    <color name="reclaim_text">#1F2937</color>
+    <color name="reclaim_muted">#6B7280</color>
+    <color name="reclaim_success">#2E7D32</color>
+    <color name="reclaim_error">#C62828</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+</resources>

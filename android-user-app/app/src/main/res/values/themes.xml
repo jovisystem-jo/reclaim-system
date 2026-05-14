@@ -1,0 +1,12 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.ReclaimUserApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/reclaim_orange</item>
+        <item name="colorPrimaryVariant">@color/reclaim_orange_dark</item>
+        <item name="colorSecondary">@color/reclaim_orange</item>
+        <item name="android:statusBarColor">@color/reclaim_orange_dark</item>
+        <item name="android:navigationBarColor">@color/reclaim_orange_dark</item>
+        <item name="colorSurface">@color/white</item>
+        <item name="colorOnSurface">@color/reclaim_text</item>
+        <item name="android:windowBackground">@color/reclaim_surface</item>
+    </style>
+</resources>

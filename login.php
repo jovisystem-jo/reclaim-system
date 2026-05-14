@@ -16,7 +16,9 @@ if (isset($_SESSION['userID'])) {
 }
 
 $error = '';
+$success = '';
 $redirect = trim($_GET['redirect'] ?? '');
+$resetStatus = trim($_GET['reset'] ?? '');
 
 if ($redirect !== '') {
     $redirect = ltrim($redirect, '/');
@@ -27,6 +29,10 @@ if ($redirect !== '') {
     ) {
         $redirect = '';
     }
+}
+
+if ($resetStatus === 'success') {
+    $success = 'Password reset successful. You can now login with your new password.';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -112,6 +118,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php if($error): ?>
                             <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
                         <?php endif; ?>
+                        <?php if($success): ?>
+                            <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
+                        <?php endif; ?>
                         
                         <form method="POST" action="">
                             <?= csrf_field() ?>
@@ -128,6 +137,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <span class="input-group-text"><i class="fas fa-lock"></i></span>
                                     <input type="password" class="form-control" id="password" name="password" required>
                                 </div>
+                            </div>
+                            <div class="text-end mb-3">
+                                <a href="forgot-password.php<?= $redirect !== '' ? '?redirect=' . urlencode($redirect) : '' ?>">Forgot Password?</a>
                             </div>
                             <div class="d-grid">
                                 <button type="submit" class="btn btn-primary">

@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Reclaim User</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="items">Items</string>
+    <string name="claims">Claims</string>
+    <string name="notifications">Notifications</string>
+    <string name="profile">Profile</string>
+    <string name="login">Login</string>
+    <string name="register">Register</string>
+    <string name="logout">Logout</string>
+    <string name="report_item">Report Item</string>
+    <string name="save_profile">Save Profile</string>
+    <string name="submit_claim">Submit Claim</string>
+    <string name="search_items">Search items</string>
+    <string name="empty_state">Nothing to show yet.</string>
+</resources>

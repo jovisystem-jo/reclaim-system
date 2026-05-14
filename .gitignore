@@ -9,3 +9,7 @@ vendor/
 # User-uploaded files
 assets/uploads/*
 !assets/uploads/.htaccess
+
+# Runtime session files
+storage/sessions/*
+!storage/sessions/.gitignore
