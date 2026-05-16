@@ -32,8 +32,9 @@ class NotificationsFragment : Fragment() {
         val recycler: RecyclerView = view.findViewById(R.id.recyclerNotifications)
         val swipe: SwipeRefreshLayout = view.findViewById(R.id.swipeNotifications)
 
-        val adapter = NotificationAdapter { notification ->
-            lifecycleScope.launch {
+        lateinit var adapter: NotificationAdapter
+        adapter = NotificationAdapter { notification ->
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.markNotificationRead(notification.id)
                     .onSuccess {
                         loadNotifications(repository, adapter, progress, empty, swipe)
@@ -48,7 +49,7 @@ class NotificationsFragment : Fragment() {
         recycler.adapter = adapter
 
         buttonMarkAll.setOnClickListener {
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.markAllNotificationsRead()
                     .onSuccess {
                         loadNotifications(repository, adapter, progress, empty, swipe)
@@ -74,7 +75,7 @@ class NotificationsFragment : Fragment() {
         swipe: SwipeRefreshLayout
     ) {
         progress.visibility = View.VISIBLE
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             repository.notifications()
                 .onSuccess { response ->
                     adapter.submitList(response.notifications)

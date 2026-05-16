@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+def apiBaseUrl = (project.findProperty("API_BASE_URL") ?: System.getenv("API_BASE_URL") ?: "http://10.0.2.2/reclaim-system/api/mobile/").toString()
+def usesCleartextTraffic = apiBaseUrl.toLowerCase().startsWith("http://")
+
 android {
     namespace "com.reclaim.mobile"
     compileSdk 34
@@ -11,11 +14,12 @@ android {
         applicationId "com.reclaim.mobile"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 4
+        versionName "1.1.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField "String", "API_BASE_URL", "\"http://10.0.2.2/reclaim-system/api/mobile/\""
+        buildConfigField "String", "API_BASE_URL", "\"${apiBaseUrl}\""
+        manifestPlaceholders = [usesCleartextTraffic: usesCleartextTraffic.toString()]
     }
 
     buildTypes {

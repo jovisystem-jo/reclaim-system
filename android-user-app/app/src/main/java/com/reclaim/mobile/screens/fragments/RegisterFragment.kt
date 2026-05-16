@@ -41,7 +41,7 @@ class RegisterFragment : Fragment() {
         val authRepository = AuthRepository(requireContext())
         val repository = MobileRepository(requireContext())
 
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             repository.options()
                 .onSuccess { options ->
                     department.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, options.departments)
@@ -57,7 +57,7 @@ class RegisterFragment : Fragment() {
             progress.visibility = View.VISIBLE
             registerButton.isEnabled = false
 
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 authRepository.register(
                     name = name.text?.toString()?.trim().orEmpty(),
                     email = email.text?.toString()?.trim().orEmpty(),

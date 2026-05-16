@@ -35,7 +35,7 @@ class LoginFragment : Fragment() {
             progress.visibility = View.VISIBLE
             loginButton.isEnabled = false
 
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.login(
                     email.text?.toString()?.trim().orEmpty(),
                     password.text?.toString().orEmpty()

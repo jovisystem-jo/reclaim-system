@@ -41,11 +41,11 @@ class ItemAdapter(
 
         fun bind(item: Item) {
             title.text = item.title
-            status.text = "${item.status.uppercase()} • ${item.category}"
+            status.text = "${item.status.uppercase()} | ${item.category}"
             meta.text = buildString {
                 append(item.foundLocation.ifBlank { item.location })
                 if ((item.claimCount ?: 0) > 0) {
-                    append(" • Claims: ${item.claimCount}")
+                    append(" | Claims: ${item.claimCount}")
                 }
             }
             itemView.setOnClickListener { onClick(item) }

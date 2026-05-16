@@ -13,4 +13,21 @@
     <string name="submit_claim">Submit Claim</string>
     <string name="search_items">Search items</string>
     <string name="empty_state">Nothing to show yet.</string>
+    <string name="item_details">Item Details</string>
+    <string name="edit_item">Edit Item</string>
+    <string name="edit_report">Edit Report</string>
+    <string name="update_item">Update Item</string>
+    <string name="replace_image">Choose New Image</string>
+    <string name="remove_current_image">Remove current image</string>
+    <string name="no_image_selected">No image selected.</string>
+    <string name="selected_image">Selected image: %1$s</string>
+    <string name="current_image_kept">Current image will be kept. Choose a new image to replace it.</string>
+    <string name="current_image_removed">Current image will be removed when you save.</string>
+    <string name="delivery_other_hint">Custom delivery location</string>
+    <string name="server_connection">Server Connection</string>
+    <string name="server_url_label">Server URL</string>
+    <string name="server_url_helper">For a phone install, use your PC IP or hosted URL instead of 10.0.2.2.</string>
+    <string name="save_server_url">Save Server URL</string>
+    <string name="server_url_saved">Server URL saved.</string>
+    <string name="server_url_required">Enter a valid server URL.</string>
 </resources>

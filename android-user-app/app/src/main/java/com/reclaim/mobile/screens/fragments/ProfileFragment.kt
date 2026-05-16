@@ -14,17 +14,21 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import com.reclaim.mobile.R
+import com.reclaim.mobile.api.network.ApiClient
 import com.reclaim.mobile.api.network.ApiErrorParser
 import com.reclaim.mobile.api.network.MobileRepository
 import com.reclaim.mobile.auth.AuthRepository
 import com.reclaim.mobile.models.ProfileEnvelope
 import com.reclaim.mobile.screens.activities.AuthActivity
+import com.reclaim.mobile.storage.settings.AppSettingsManager
 import kotlinx.coroutines.launch
 
 class ProfileFragment : Fragment() {
     private lateinit var repository: MobileRepository
     private lateinit var authRepository: AuthRepository
+    private lateinit var settingsManager: AppSettingsManager
     private var departments: List<String> = emptyList()
     private var currentProfile: ProfileEnvelope? = null
 
@@ -35,6 +39,7 @@ class ProfileFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         repository = MobileRepository(requireContext())
         authRepository = AuthRepository(requireContext())
+        settingsManager = AppSettingsManager(requireContext())
 
         val header: TextView = view.findViewById(R.id.textProfileHeader)
         val stats: TextView = view.findViewById(R.id.textProfileStats)
@@ -47,12 +52,17 @@ class ProfileFragment : Fragment() {
         val errorText: TextView = view.findViewById(R.id.textProfileError)
         val progress: ProgressBar = view.findViewById(R.id.progressProfile)
         val saveButton: MaterialButton = view.findViewById(R.id.buttonSaveProfile)
+        val serverUrlLayout: TextInputLayout = view.findViewById(R.id.inputProfileServerUrl)
+        val serverUrlInput: TextInputEditText = view.findViewById(R.id.editProfileServerUrl)
+        val saveServerUrlButton: MaterialButton = view.findViewById(R.id.buttonSaveServerUrl)
         val logoutButton: MaterialButton = view.findViewById(R.id.buttonLogout)
+
+        serverUrlInput.setText(settingsManager.getApiBaseUrl())
 
         fun bindProfile(profile: ProfileEnvelope) {
             currentProfile = profile
             header.text = profile.user.name
-            stats.text = "Reports: ${profile.stats?.totalReports ?: 0} • Claims: ${profile.stats?.totalClaims ?: 0} • Approved: ${profile.stats?.approvedClaims ?: 0}"
+            stats.text = "Reports: ${profile.stats?.totalReports ?: 0} | Claims: ${profile.stats?.totalClaims ?: 0} | Approved: ${profile.stats?.approvedClaims ?: 0}"
             name.setText(profile.user.name)
             phone.setText(profile.user.phone)
             studentId.setText(profile.user.studentStaffId)
@@ -65,7 +75,7 @@ class ProfileFragment : Fragment() {
 
         fun loadProfile() {
             progress.visibility = View.VISIBLE
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.profile()
                     .onSuccess { bindProfile(it) }
                     .onFailure {
@@ -76,7 +86,7 @@ class ProfileFragment : Fragment() {
             }
         }
 
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             repository.options()
                 .onSuccess { options ->
                     departments = options.departments
@@ -89,10 +99,26 @@ class ProfileFragment : Fragment() {
                 }
         }
 
+        saveServerUrlButton.setOnClickListener {
+            serverUrlLayout.error = null
+
+            runCatching {
+                settingsManager.saveApiBaseUrl(serverUrlInput.text?.toString().orEmpty())
+            }.onSuccess { normalizedUrl ->
+                serverUrlInput.setText(normalizedUrl)
+                ApiClient.reset()
+                repository = MobileRepository(requireContext())
+                Toast.makeText(requireContext(), getString(R.string.server_url_saved), Toast.LENGTH_LONG).show()
+                loadProfile()
+            }.onFailure {
+                serverUrlLayout.error = getString(R.string.server_url_required)
+            }
+        }
+
         saveButton.setOnClickListener {
             errorText.visibility = View.GONE
             progress.visibility = View.VISIBLE
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.updateProfile(
                     name = name.text?.toString()?.trim().orEmpty(),
                     phone = phone.text?.toString()?.trim().orEmpty(),
@@ -114,7 +140,7 @@ class ProfileFragment : Fragment() {
         }
 
         logoutButton.setOnClickListener {
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 authRepository.logout()
                 startActivity(Intent(requireContext(), AuthActivity::class.java))
                 requireActivity().finish()

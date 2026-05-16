@@ -6,8 +6,9 @@ import com.reclaim.mobile.models.AuthData
 import com.reclaim.mobile.storage.session.SessionManager
 
 class AuthRepository(private val context: Context) {
-    private val api = ApiClient.service(context)
-    private val session = SessionManager(context)
+    private val appContext = context.applicationContext
+    private val api get() = ApiClient.service(appContext)
+    private val session = SessionManager(appContext)
 
     suspend fun login(email: String, password: String): Result<AuthData> = runCatching {
         val response = api.login(email, password)

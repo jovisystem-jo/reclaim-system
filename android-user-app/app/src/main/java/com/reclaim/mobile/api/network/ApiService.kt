@@ -79,7 +79,25 @@ interface ApiService {
         @Part("date_occurred") dateOccurred: RequestBody,
         @Part("time_occurred") timeOccurred: RequestBody,
         @Part("delivery_option") deliveryOption: RequestBody,
+        @Part("delivery_location_other") deliveryLocationOther: RequestBody,
         @Part("status") status: RequestBody,
+        @Part image: MultipartBody.Part? = null
+    ): ApiEnvelope<ItemDetailEnvelope>
+
+    @Multipart
+    @POST("items/update.php")
+    suspend fun updateItem(
+        @Part("item_id") itemId: RequestBody,
+        @Part("title") title: RequestBody,
+        @Part("category") category: RequestBody,
+        @Part("brand") brand: RequestBody,
+        @Part("color") color: RequestBody,
+        @Part("description") description: RequestBody,
+        @Part("location") location: RequestBody,
+        @Part("date_occurred") dateOccurred: RequestBody,
+        @Part("status") status: RequestBody,
+        @Part("delivery_location") deliveryLocation: RequestBody,
+        @Part("remove_image") removeImage: RequestBody,
         @Part image: MultipartBody.Part? = null
     ): ApiEnvelope<ItemDetailEnvelope>
 

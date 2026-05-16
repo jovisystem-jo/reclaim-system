@@ -8,6 +8,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
@@ -18,6 +19,9 @@ import com.reclaim.mobile.screens.activities.MainActivity
 import kotlinx.coroutines.launch
 
 class DashboardFragment : Fragment() {
+    private var reloadDashboard: (() -> Unit)? = null
+    private var hasResumedOnce = false
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         return inflater.inflate(R.layout.fragment_dashboard, container, false)
     }
@@ -42,36 +46,51 @@ class DashboardFragment : Fragment() {
             (activity as? MainActivity)?.openItemsScope("mine")
         }
 
-        progress.visibility = View.VISIBLE
-        lifecycleScope.launch {
-            repository.dashboard()
-                .onSuccess { dashboard ->
-                    welcome.text = "Welcome, ${dashboard.user.name}"
-                    reports.text = "Reports: ${dashboard.stats.myReports}"
-                    claims.text = "Claims: ${dashboard.stats.myClaims}"
-                    approved.text = "Approved Claims: ${dashboard.stats.approvedClaims}"
+        fun loadDashboard() {
+            progress.visibility = View.VISIBLE
+            viewLifecycleOwner.lifecycleScope.launch {
+                repository.dashboard()
+                    .onSuccess { dashboard ->
+                        welcome.text = "Welcome, ${dashboard.user.name}"
+                        reports.text = "Reports: ${dashboard.stats.myReports}"
+                        claims.text = "Claims: ${dashboard.stats.myClaims}"
+                        approved.text = "Approved Claims: ${dashboard.stats.approvedClaims}"
 
-                    notificationsContainer.removeAllViews()
-                    if (dashboard.recentNotifications.isEmpty()) {
-                        empty.visibility = View.VISIBLE
-                    } else {
-                        empty.visibility = View.GONE
-                        dashboard.recentNotifications.forEach { notification ->
-                            val textView = TextView(requireContext()).apply {
-                                text = "${notification.title}\n${notification.timeAgo ?: notification.createdAt.orEmpty()}"
-                                setPadding(0, 0, 0, 16)
+                        notificationsContainer.removeAllViews()
+                        if (dashboard.recentNotifications.isEmpty()) {
+                            empty.visibility = View.VISIBLE
+                        } else {
+                            empty.visibility = View.GONE
+                            dashboard.recentNotifications.forEach { notification ->
+                                val textView = TextView(notificationsContainer.context).apply {
+                                    text = "${notification.title}\n${notification.timeAgo ?: notification.createdAt.orEmpty()}"
+                                    setPadding(0, 0, 0, 16)
+                                    setTextColor(ContextCompat.getColor(context, R.color.reclaim_text))
+                                }
+                                notificationsContainer.addView(textView)
                             }
-                            notificationsContainer.addView(textView)
                         }
                     }
-                }
-                .onFailure {
-                    empty.visibility = View.VISIBLE
-                    empty.text = ApiErrorParser.message(it)
-                    Toast.makeText(requireContext(), ApiErrorParser.message(it), Toast.LENGTH_LONG).show()
-                }
+                    .onFailure {
+                        empty.visibility = View.VISIBLE
+                        empty.text = ApiErrorParser.message(it)
+                        Toast.makeText(requireContext(), ApiErrorParser.message(it), Toast.LENGTH_LONG).show()
+                    }
 
-            progress.visibility = View.GONE
+                progress.visibility = View.GONE
+            }
+        }
+
+        reloadDashboard = ::loadDashboard
+        loadDashboard()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (hasResumedOnce) {
+            reloadDashboard?.invoke()
+        } else {
+            hasResumedOnce = true
         }
     }
 }

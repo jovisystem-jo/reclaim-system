@@ -24,7 +24,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/white"
-        app:itemIconTint="@color/reclaim_orange_dark"
-        app:itemTextColor="@color/reclaim_orange_dark"
+        app:itemIconTint="@color/bottom_nav_item_tint"
+        app:itemTextColor="@color/bottom_nav_item_tint"
         app:menu="@menu/bottom_nav_menu" />
 </LinearLayout>

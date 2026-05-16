@@ -125,6 +125,44 @@
             android:layout_marginTop="16dp"
             android:text="@string/save_profile" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/server_connection"
+            android:textColor="@color/reclaim_text"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/server_url_helper"
+            android:textColor="@color/reclaim_muted"
+            android:textSize="12sp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/inputProfileServerUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="@string/server_url_label">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editProfileServerUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonSaveServerUrl"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/save_server_url" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonLogout"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"

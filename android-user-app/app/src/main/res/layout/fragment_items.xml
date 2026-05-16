@@ -36,7 +36,8 @@
             android:layout_marginStart="8dp"
             android:backgroundTint="@color/reclaim_orange"
             android:contentDescription="@string/report_item"
-            android:src="@android:drawable/ic_input_add" />
+            android:src="@android:drawable/ic_input_add"
+            android:tint="@color/white" />
     </LinearLayout>
 
     <com.google.android.material.textfield.TextInputLayout

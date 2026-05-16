@@ -81,6 +81,20 @@ $body_classes = implode(' ', [
     'section-' . preg_replace('/[^a-z0-9\-]/i', '-', strtolower($section_slug)),
     'page-' . preg_replace('/[^a-z0-9\-]/i', '-', strtolower($page_slug))
 ]);
+$dashboard_nav_active = false;
+$account_menu_active = false;
+
+if (isset($_SESSION['userID'])) {
+    if ($is_admin_user) {
+        $account_menu_pages = ['profile.php', 'notifications.php', 'verify-claims.php', 'reports.php'];
+        $account_menu_active = $current_dir === 'admin' && in_array($current_page, $account_menu_pages, true);
+        $dashboard_nav_active = $current_dir === 'admin' && !$account_menu_active;
+    } else {
+        $account_menu_pages = ['user-profile.php', 'notifications.php', 'my-claims.php', 'my-report-item.php', 'report-item.php', 'submit-claim.php'];
+        $account_menu_active = $current_dir === 'user' && in_array($current_page, $account_menu_pages, true);
+        $dashboard_nav_active = $current_dir === 'user' && $current_page === 'dashboard.php';
+    }
+}
 ?>
 <?php if (!$embedded_layout): ?>
 <!DOCTYPE html>
@@ -301,11 +315,11 @@ $body_classes = implode(' ', [
                     <?php if(isset($_SESSION['userID'])): ?>
                         <?php if($is_admin_user): ?>
                             <li class="nav-item">
-                                <a class="nav-link <?= $current_dir === 'admin' ? 'active' : '' ?>" href="<?= $dashboard_page ?>">Admin Panel</a>
+                                <a class="nav-link <?= $dashboard_nav_active ? 'active' : '' ?>" href="<?= $dashboard_page ?>">Admin Panel</a>
                             </li>
                         <?php else: ?>
                             <li class="nav-item">
-                                <a class="nav-link <?= $current_dir === 'user' ? 'active' : '' ?>" href="<?= $dashboard_page ?>">Dashboard</a>
+                                <a class="nav-link <?= $dashboard_nav_active ? 'active' : '' ?>" href="<?= $dashboard_page ?>">Dashboard</a>
                             </li>
                         <?php endif; ?>
                         
@@ -369,7 +383,7 @@ $body_classes = implode(' ', [
                         </li>
                         
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle <?= in_array($current_dir, ['user', 'admin'], true) ? 'active' : '' ?>" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <a class="nav-link dropdown-toggle <?= $account_menu_active ? 'active' : '' ?>" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="fas fa-user-circle"></i> <?= htmlspecialchars($_SESSION['name']) ?>
                             </a>
                             <ul class="dropdown-menu" aria-labelledby="userDropdown">

@@ -49,10 +49,10 @@ class ClaimsFragment : Fragment() {
 
         loadClaims = {
             progress.visibility = View.VISIBLE
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.claims()
                     .onSuccess { response ->
-                        stats.text = "Total: ${response.stats.total} • Pending: ${response.stats.pending} • Approved: ${response.stats.approved} • Completed: ${response.stats.completed}"
+                        stats.text = "Total: ${response.stats.total} | Pending: ${response.stats.pending} | Approved: ${response.stats.approved} | Completed: ${response.stats.completed}"
                         adapter.submitList(response.claims)
                         empty.visibility = if (response.claims.isEmpty()) View.VISIBLE else View.GONE
                     }
@@ -83,7 +83,7 @@ class ClaimsFragment : Fragment() {
             .setMessage("Do you want to $action this claim?")
             .setPositiveButton("Yes") { _, _ ->
                 progress.visibility = View.VISIBLE
-                lifecycleScope.launch {
+                viewLifecycleOwner.lifecycleScope.launch {
                     val result = if (claim.status == "pending") {
                         repository.cancelClaim(claim.id)
                     } else {

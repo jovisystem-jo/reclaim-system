@@ -15,10 +15,10 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
 
 class MobileRepository(private val context: Context) {
-    private val api = ApiClient.service(context)
+    private val appContext = context.applicationContext
+    private val api get() = ApiClient.service(appContext)
 
     suspend fun dashboard(): Result<DashboardEnvelope> = runCatching {
         val response = api.dashboard()
@@ -45,6 +45,7 @@ class MobileRepository(private val context: Context) {
         dateOccurred: String,
         timeOccurred: String,
         deliveryOption: String,
+        deliveryLocationOther: String,
         status: String,
         imageUri: Uri?
     ): Result<Item> = runCatching {
@@ -59,7 +60,40 @@ class MobileRepository(private val context: Context) {
             dateOccurred = dateOccurred.toTextPart(),
             timeOccurred = timeOccurred.toTextPart(),
             deliveryOption = deliveryOption.toTextPart(),
+            deliveryLocationOther = deliveryLocationOther.toTextPart(),
             status = status.toTextPart(),
+            image = imagePart
+        )
+        response.data?.item ?: throw IllegalStateException(response.message)
+    }
+
+    suspend fun updateItem(
+        itemId: Int,
+        title: String,
+        category: String,
+        brand: String,
+        color: String,
+        description: String,
+        location: String,
+        dateOccurred: String,
+        status: String,
+        deliveryLocation: String,
+        removeImage: Boolean,
+        imageUri: Uri?
+    ): Result<Item> = runCatching {
+        val imagePart = imageUri?.let { uriToMultipart("image", it) }
+        val response = api.updateItem(
+            itemId = itemId.toString().toTextPart(),
+            title = title.toTextPart(),
+            category = category.toTextPart(),
+            brand = brand.toTextPart(),
+            color = color.toTextPart(),
+            description = description.toTextPart(),
+            location = location.toTextPart(),
+            dateOccurred = dateOccurred.toTextPart(),
+            status = status.toTextPart(),
+            deliveryLocation = deliveryLocation.toTextPart(),
+            removeImage = (if (removeImage) "1" else "0").toTextPart(),
             image = imagePart
         )
         response.data?.item ?: throw IllegalStateException(response.message)
@@ -133,7 +167,7 @@ class MobileRepository(private val context: Context) {
     private fun String.toTextPart(): RequestBody = toRequestBody("text/plain".toMediaType())
 
     private fun uriToMultipart(partName: String, uri: Uri): MultipartBody.Part {
-        val file = FileUtils.copyUriToCache(context, uri)
+        val file = FileUtils.copyUriToCache(appContext, uri)
         val body = file.asRequestBody("image/*".toMediaType())
         return MultipartBody.Part.createFormData(partName, file.name, body)
     }

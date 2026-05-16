@@ -28,6 +28,8 @@ class ItemsFragment : Fragment() {
     private var scope: String = "public"
     private lateinit var repository: MobileRepository
     private lateinit var adapter: ItemAdapter
+    private var reloadItems: (() -> Unit)? = null
+    private var hasResumedOnce = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,7 +66,7 @@ class ItemsFragment : Fragment() {
 
         fun loadItems() {
             progress.visibility = View.VISIBLE
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 repository.items(scope, search.text?.toString()?.trim().orEmpty(), null)
                     .onSuccess { response ->
                         adapter.submitList(response.items)
@@ -80,6 +82,8 @@ class ItemsFragment : Fragment() {
                 swipe.isRefreshing = false
             }
         }
+
+        reloadItems = ::loadItems
 
         publicButton.setOnClickListener {
             scope = "public"
@@ -113,9 +117,10 @@ class ItemsFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        view?.findViewById<SwipeRefreshLayout>(R.id.swipeItems)?.isRefreshing = true
-        view?.post {
-            view?.findViewById<SwipeRefreshLayout>(R.id.swipeItems)?.isRefreshing = false
+        if (hasResumedOnce) {
+            reloadItems?.invoke()
+        } else {
+            hasResumedOnce = true
         }
     }
 

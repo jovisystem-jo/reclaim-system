@@ -1,7 +1,7 @@
 package com.reclaim.mobile.api.network
 
 import android.content.Context
-import com.reclaim.mobile.BuildConfig
+import com.reclaim.mobile.storage.settings.AppSettingsManager
 import com.reclaim.mobile.storage.session.SessionManager
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -13,14 +13,39 @@ object ApiClient {
 
     @Volatile
     private var service: ApiService? = null
+    @Volatile
+    private var activeBaseUrl: String? = null
 
     fun service(context: Context): ApiService {
-        return service ?: synchronized(this) {
-            service ?: buildService(context).also { service = it }
+        val appContext = context.applicationContext
+        val requestedBaseUrl = AppSettingsManager(appContext).getApiBaseUrl()
+        val cachedService = service
+
+        if (cachedService != null && activeBaseUrl == requestedBaseUrl) {
+            return cachedService
+        }
+
+        return synchronized(this) {
+            val refreshedService = service
+            if (refreshedService != null && activeBaseUrl == requestedBaseUrl) {
+                refreshedService
+            } else {
+                buildService(appContext, requestedBaseUrl).also {
+                    service = it
+                    activeBaseUrl = requestedBaseUrl
+                }
+            }
         }
     }
 
-    private fun buildService(context: Context): ApiService {
+    fun reset() {
+        synchronized(this) {
+            service = null
+            activeBaseUrl = null
+        }
+    }
+
+    private fun buildService(context: Context, baseUrl: String): ApiService {
         val sessionManager = SessionManager(context.applicationContext)
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
@@ -35,7 +60,7 @@ object ApiClient {
             .build()
 
         return Retrofit.Builder()
-            .baseUrl(BuildConfig.API_BASE_URL)
+            .baseUrl(baseUrl)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
