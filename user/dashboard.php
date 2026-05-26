@@ -167,10 +167,12 @@ $base_url = '/reclaim-system/';
         .status-badge {
             flex-shrink: 0;
             white-space: nowrap;
-            padding: 4px 10px;
+            padding: 3px 8px;
             border-radius: 20px;
-            font-size: 11px;
-            font-weight: bold;
+            text-align: center;
+            font-size: 0.75rem !important;
+            font-weight: 500;
+            line-height: 1.2;
             color: white;
             display: inline-flex;
             align-items: center;

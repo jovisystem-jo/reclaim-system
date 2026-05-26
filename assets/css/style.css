@@ -428,7 +428,7 @@ small, .small {
     padding: 0 16px;
     border-radius: 999px;
     color: var(--text-primary);
-    font-size: 1rem;
+    font-size: 0.75rem !important;
     font-weight: 800;
     line-height: 1;
     white-space: nowrap;
