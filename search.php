@@ -1310,6 +1310,7 @@ function getMatchLevel($score) {
                                         
                                         <!-- Item Basic Info -->
                                         <p class="card-text small text-muted mb-2">
+                                            <i class="fas fa-map-marker-alt"></i>
                                             <?php 
                                             $display_location = htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A');
                                             // Highlight location if matching filter

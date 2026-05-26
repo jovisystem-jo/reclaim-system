@@ -432,6 +432,7 @@ if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
                             
                             <div class="item-meta">
                                 <div class="item-meta-row">
+                                    <i class="fas fa-map-marker-alt"></i>
                                     <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'N/A') ?></span>
                                 </div>
                                 <div class="item-meta-row">

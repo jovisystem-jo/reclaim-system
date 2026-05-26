@@ -563,6 +563,7 @@ require_once 'includes/header.php';
                                 </div>
                                 <div class="item-meta">
                                     <div class="item-meta-row">
+                                        <i class="fas fa-map-marker-alt"></i>
                                         <span><?= htmlspecialchars($item['found_location'] ?? $item['location'] ?? 'Not specified') ?></span>
                                     </div>
                                     <div class="item-meta-row">
