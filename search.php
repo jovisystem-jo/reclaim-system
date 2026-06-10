@@ -11,7 +11,14 @@ $visible_statuses = ['lost', 'found'];
 $image_search_notice = '';
 $image_match_ids = [];
 $search_query_tokens = [];
-$image_label_tokens = [];
+$image_scores = [];
+$highest_match = null;
+$highest_match_category = '';
+$image_analysis_data = null;
+$is_image_search = false;
+
+const IMAGE_CATEGORY_EXPANSION_THRESHOLD = 55.0;
+const MIN_IMAGE_RESULT_SCORE = 45.0;
 
 // Get filter values
 $search_query = $_GET['query'] ?? '';
@@ -50,58 +57,88 @@ $params = [];
 if ($image_analysis_id > 0) {
     $stmt = $db->prepare("SELECT * FROM image_analysis WHERE analysis_id = ?");
     $stmt->execute([$image_analysis_id]);
-    $analysis = $stmt->fetch();
+    $image_analysis_data = $stmt->fetch();
 
-    if ($analysis) {
-        // Try to decode as JSON first (new format)
-        $extractedData = json_decode($analysis['extracted_text'], true);
-        
-        if (is_array($extractedData) && isset($extractedData[0]['item_id'])) {
-            // New format: extracted_text contains JSON with match details
+    if ($image_analysis_data) {
+        $is_image_search = true;
+        $extractedData = json_decode($image_analysis_data['extracted_text'], true);
+        if (is_array($extractedData) && !empty($extractedData)) {
             foreach ($extractedData as $match) {
-                if (isset($match['item_id']) && $match['item_id'] > 0) {
-                    $image_match_ids[] = $match['item_id'];
+                if (!is_array($match) || !isset($match['item_id'])) {
+                    continue;
                 }
-            }
-        } else {
-            // Old format: try labels
-            $labels = json_decode($analysis['labels'], true);
-            $rawMatchedIds = $analysis['matched_item_ids'] ?? '';
-            $decodedMatchedIds = json_decode((string) $rawMatchedIds, true);
 
-            if (is_array($decodedMatchedIds)) {
-                foreach ($decodedMatchedIds as $matchedId) {
-                    $matchedId = (int) $matchedId;
-                    if ($matchedId > 0 && !in_array($matchedId, $image_match_ids, true)) {
-                        $image_match_ids[] = $matchedId;
-                    }
+                $itemId = (int) $match['item_id'];
+                if ($itemId <= 0) {
+                    continue;
                 }
-            } elseif (is_string($rawMatchedIds) && trim($rawMatchedIds) !== '') {
-                foreach (preg_split('/[\s,]+/', trim($rawMatchedIds)) ?: [] as $matchedId) {
-                    $matchedId = (int) $matchedId;
-                    if ($matchedId > 0 && !in_array($matchedId, $image_match_ids, true)) {
-                        $image_match_ids[] = $matchedId;
-                    }
-                }
-            }
 
-            if (is_array($labels) && !empty($labels)) {
-                $meaningfulLabels = array_values(array_filter(array_map('normalizeImageSearchLabel', $labels), 'isMeaningfulImageLabel'));
-                $search_query = implode(' ', $meaningfulLabels);
-                $image_label_tokens = extractTextMatchTokens($search_query);
+                if (!isConfidentStoredImageMatch($match)) {
+                    continue;
+                }
+
+                $image_scores[$itemId] = $match;
             }
         }
 
-        if (!empty($image_match_ids)) {
-            $placeholders = implode(',', array_fill(0, count($image_match_ids), '?'));
-            $sql .= " AND item_id IN ($placeholders)";
-            $params = array_merge($params, $image_match_ids);
+        if (!empty($image_scores)) {
+            uasort($image_scores, static function ($left, $right) {
+                $leftImageScore = (float) ($left['image_score'] ?? $left['visual_score'] ?? $left['similarity_percentage'] ?? 0);
+                $rightImageScore = (float) ($right['image_score'] ?? $right['visual_score'] ?? $right['similarity_percentage'] ?? 0);
+
+                if ($rightImageScore !== $leftImageScore) {
+                    return $rightImageScore <=> $leftImageScore;
+                }
+
+                return ((float) ($right['final_score'] ?? 0)) <=> ((float) ($left['final_score'] ?? 0));
+            });
+
+            $image_match_ids = array_values(array_map('intval', array_keys($image_scores)));
+            $highest_match = reset($image_scores) ?: null;
+            if ($highest_match && isset($highest_match['item_id'])) {
+                if (trim((string) ($highest_match['color'] ?? '')) === '') {
+                    $highestColorStmt = $db->prepare("SELECT color FROM items WHERE item_id = ? LIMIT 1");
+                    $highestColorStmt->execute([(int) $highest_match['item_id']]);
+                    $highestColorRow = $highestColorStmt->fetch();
+                    if (is_array($highestColorRow)) {
+                        $highest_match['color'] = (string) ($highestColorRow['color'] ?? '');
+                    }
+                }
+
+                $highest_match_category = trim((string) ($highest_match['category'] ?? ''));
+                $image_match_ids = [(int) $highest_match['item_id']];
+                $image_search_notice = 'Showing the best AI match for the uploaded image.';
+            }
         }
+        if (empty($image_match_ids) && $image_search_notice === '') {
+            $image_search_notice = 'No confident AI match was found for this upload.';
+        }
+    }
+
+    if (!empty($image_match_ids)) {
+        $placeholders = implode(',', array_fill(0, count($image_match_ids), '?'));
+        $sql .= " AND item_id IN ($placeholders)";
+        $params = array_merge($params, $image_match_ids);
+    } elseif ($image_analysis_data) {
+        $sql .= " AND 1 = 0";
     }
 }
 
+$has_standard_filters = !empty($search_query) || !empty($category) || !empty($status) || !empty($location) ||
+    !empty($date_from) || !empty($date_to) || !empty($item_title);
+
+if ($is_image_search) {
+    $search_query = '';
+    $category = '';
+    $status = '';
+    $location = '';
+    $date_from = '';
+    $date_to = '';
+    $item_title = '';
+}
+
 // Regular text search - ONLY if no image search is active
-$is_text_search = !empty($search_query) && $image_analysis_id == 0;
+$is_text_search = !empty($search_query) && !$is_image_search;
 if ($is_text_search) {
     $search_query_tokens = extractTextMatchTokens($search_query);
 
@@ -109,7 +146,10 @@ if ($is_text_search) {
         $tokenConditions = [];
         foreach ($search_query_tokens as $token) {
             $search_term = '%' . $token . '%';
-            $tokenConditions[] = "(title LIKE ? OR description LIKE ? OR category LIKE ? OR brand LIKE ? OR color LIKE ? OR found_location LIKE ?)";
+            $tokenConditions[] = "(title LIKE ? OR description LIKE ? OR category LIKE ? OR brand LIKE ? OR color LIKE ? OR found_location LIKE ? OR location LIKE ? OR delivery_location LIKE ? OR image_tags LIKE ?)";
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
             $params[] = $search_term;
             $params[] = $search_term;
             $params[] = $search_term;
@@ -120,43 +160,44 @@ if ($is_text_search) {
 
         $sql .= " AND (" . implode(' OR ', $tokenConditions) . ")";
     } else {
-        $sql .= " AND (title LIKE ? OR description LIKE ? OR category LIKE ? OR found_location LIKE ?)";
+        $sql .= " AND (title LIKE ? OR description LIKE ? OR category LIKE ? OR brand LIKE ? OR color LIKE ? OR found_location LIKE ? OR location LIKE ? OR delivery_location LIKE ? OR image_tags LIKE ?)";
         $search_term = "%$search_query%";
-        $params[] = $search_term;
-        $params[] = $search_term;
-        $params[] = $search_term;
-        $params[] = $search_term;
+        for ($i = 0; $i < 9; $i++) {
+            $params[] = $search_term;
+        }
     }
 }
 
-if (!empty($item_title)) {
-    $sql .= " AND title LIKE ?";
+if (!$is_image_search && !empty($item_title)) {
+    $sql .= " AND (title LIKE ? OR description LIKE ?)";
+    $params[] = "%$item_title%";
     $params[] = "%$item_title%";
 }
 
-if (!empty($category)) {
+if (!$is_image_search && !empty($category)) {
     $sql .= " AND category = ?";
     $params[] = $category;
 }
 
-if (!empty($status)) {
+if (!$is_image_search && !empty($status)) {
     $sql .= " AND status = ?";
     $params[] = $status;
 }
 
-if (!empty($location)) {
-    $sql .= " AND (found_location LIKE ? OR location LIKE ?)";
+if (!$is_image_search && !empty($location)) {
+    $sql .= " AND (found_location LIKE ? OR location LIKE ? OR delivery_location LIKE ?)";
+    $params[] = "%$location%";
     $params[] = "%$location%";
     $params[] = "%$location%";
 }
 
-if (!empty($date_from)) {
-    $sql .= " AND DATE(date_found) >= ?";
+if (!$is_image_search && !empty($date_from)) {
+    $sql .= " AND DATE(COALESCE(date_found, reported_date)) >= ?";
     $params[] = $date_from;
 }
 
-if (!empty($date_to)) {
-    $sql .= " AND DATE(date_found) <= ?";
+if (!$is_image_search && !empty($date_to)) {
+    $sql .= " AND DATE(COALESCE(date_found, reported_date)) <= ?";
     $params[] = $date_to;
 }
 
@@ -165,109 +206,96 @@ if (!empty($image_match_ids)) {
     $sql .= " ORDER BY FIELD(item_id, $orderPlaceholders)";
     $params = array_merge($params, $image_match_ids);
 } else {
-    $sql .= " ORDER BY reported_date DESC";
+    $sql .= " ORDER BY COALESCE(date_found, reported_date) DESC";
 }
 
 $stmt = $db->prepare($sql);
 $stmt->execute($params);
 $search_results = $stmt->fetchAll();
 
-// Load match scores from image analysis if available
-$image_scores = [];
-$highest_match = null;
-$highest_category = null;
-$highest_keywords = [];
-
-if ($image_analysis_id > 0) {
-    $stmt = $db->prepare("SELECT extracted_text FROM image_analysis WHERE analysis_id = ?");
-    $stmt->execute([$image_analysis_id]);
-    $analysis = $stmt->fetch();
-    if ($analysis && !empty($analysis['extracted_text'])) {
-        $scoresData = json_decode($analysis['extracted_text'], true);
-        if (is_array($scoresData)) {
-            foreach ($scoresData as $scoreItem) {
-                if (isset($scoreItem['item_id'])) {
-                    $image_scores[$scoreItem['item_id']] = $scoreItem;
-                }
-            }
-        }
+if (!empty($search_results)) {
+    $deduped_results = [];
+    foreach ($search_results as $item) {
+        $deduped_results[(int) ($item['item_id'] ?? 0)] = $item;
     }
-    
-    // Get the highest match (first item with highest score)
-    if (!empty($image_scores)) {
-        // Sort by final score to get highest
-        uasort($image_scores, function($a, $b) {
-            return $b['final_score'] <=> $a['final_score'];
-        });
-        
-        $highest_match = reset($image_scores);
-        if ($highest_match) {
-            $highest_category = $highest_match['category'] ?? '';
-            // Extract keywords from highest match title and description
-            $highest_keywords = array_merge(
-                explode(' ', strtolower($highest_match['title'] ?? '')),
-                explode(' ', strtolower($highest_match['description'] ?? ''))
-            );
-            $highest_keywords = array_filter($highest_keywords, function($word) {
-                return strlen($word) > 2;
-            });
-            $highest_keywords = array_unique($highest_keywords);
-        }
-    }
+    $search_results = array_values($deduped_results);
 }
 
-// Filter results to only show items matching the highest match's category or keywords
-if ($image_analysis_id > 0 && $highest_match && !empty($search_results)) {
-    $filtered_results = [];
-    
-    foreach ($search_results as $item) {
-        $should_include = false;
-        
-        // Check if same category as highest match
-        if (!empty($highest_category) && $item['category'] == $highest_category) {
-            $should_include = true;
+if (
+    $is_image_search
+    && $highest_match
+    && $highest_match_category !== ''
+    && ((float) ($highest_match['similarity_percentage'] ?? $highest_match['image_score'] ?? 0)) > IMAGE_CATEGORY_EXPANSION_THRESHOLD
+) {
+    $relatedStmt = $db->prepare("
+        SELECT *
+        FROM items
+        WHERE status IN ('lost', 'found')
+          AND category = ?
+          AND item_id != ?
+        ORDER BY COALESCE(date_found, reported_date) DESC
+        LIMIT 12
+    ");
+    $relatedStmt->execute([
+        $highest_match_category,
+        (int) ($highest_match['item_id'] ?? 0),
+    ]);
+    $relatedItems = $relatedStmt->fetchAll();
+
+    foreach ($relatedItems as $relatedItem) {
+        $relatedItemId = (int) ($relatedItem['item_id'] ?? 0);
+        if ($relatedItemId <= 0) {
+            continue;
         }
-        
-        // Check if title contains keywords from highest match
-        if (!$should_include && !empty($highest_keywords)) {
-            $item_title_lower = strtolower($item['title'] ?? '');
-            $item_desc_lower = strtolower($item['description'] ?? '');
-            
-            foreach ($highest_keywords as $keyword) {
-                if (strpos($item_title_lower, $keyword) !== false || 
-                    strpos($item_desc_lower, $keyword) !== false) {
-                    $should_include = true;
-                    break;
-                }
+
+        $alreadyShown = false;
+        foreach ($search_results as $existingItem) {
+            if ((int) ($existingItem['item_id'] ?? 0) === $relatedItemId) {
+                $alreadyShown = true;
+                break;
             }
         }
-        
-        // Always include the highest match itself
-        if ($item['item_id'] == $highest_match['item_id']) {
-            $should_include = true;
+
+        if ($alreadyShown) {
+            continue;
         }
-        
-        if ($should_include) {
-            $filtered_results[] = $item;
+
+        if (!colorsAreCompatible(
+            (string) ($highest_match['color'] ?? ''),
+            (string) ($relatedItem['color'] ?? '')
+        )) {
+            continue;
         }
+
+        $relatedItem['is_related_category_item'] = true;
+        $search_results[] = $relatedItem;
     }
-    
-    $search_results = $filtered_results;
-    $total_results = count($search_results);
-    
-    if (empty($search_results)) {
-        $image_search_notice = 'No items found matching the category or keywords of the top match.';
+
+    if (count($search_results) > 1) {
+        $image_search_notice = 'Showing the best AI match and other items from the same category.';
     }
 }
 
 // Merge scores with search results
 foreach ($search_results as &$item) {
     if (isset($image_scores[$item['item_id']])) {
-        $item['visual_score'] = $image_scores[$item['item_id']]['visual_score'] ?? 0;
-        $item['title_score'] = $image_scores[$item['item_id']]['title_score'] ?? 0;
-        $item['description_score'] = $image_scores[$item['item_id']]['description_score'] ?? 0;
+        $item['visual_score'] = $image_scores[$item['item_id']]['image_score']
+            ?? $image_scores[$item['item_id']]['visual_score']
+            ?? 0;
+        $item['image_score'] = $image_scores[$item['item_id']]['image_score']
+            ?? $image_scores[$item['item_id']]['visual_score']
+            ?? 0;
+        $item['imagga_score'] = $image_scores[$item['item_id']]['imagga_score'] ?? 0;
+        $item['jaccard_score'] = $image_scores[$item['item_id']]['jaccard_score'] ?? 0;
         $item['category_score'] = $image_scores[$item['item_id']]['category_score'] ?? 0;
-        $item['similarity_percentage'] = $image_scores[$item['item_id']]['final_score'] ?? 0;
+        $item['orb_score'] = $image_scores[$item['item_id']]['orb_score'] ?? 0;
+        $item['histogram_score'] = $image_scores[$item['item_id']]['histogram_score'] ?? 0;
+        $item['verified_matches'] = $image_scores[$item['item_id']]['verified_matches'] ?? 0;
+        $item['matched_tags'] = $image_scores[$item['item_id']]['matched_tags'] ?? [];
+        $item['similarity_percentage'] = $image_scores[$item['item_id']]['similarity_percentage']
+            ?? $image_scores[$item['item_id']]['image_score']
+            ?? $image_scores[$item['item_id']]['visual_score']
+            ?? 0;
         $item['match_level'] = $image_scores[$item['item_id']]['match_level'] ?? getMatchLevel($item['similarity_percentage'] ?? 0);
         $item['match_reason'] = $image_scores[$item['item_id']]['match_reason'] ?? '';
         
@@ -280,7 +308,7 @@ foreach ($search_results as &$item) {
 unset($item);
 
 // Re-sort by similarity score
-if ($image_analysis_id > 0 && !empty($image_scores)) {
+if ($is_image_search && !empty($image_scores)) {
     usort($search_results, function($a, $b) {
         $scoreA = $a['similarity_percentage'] ?? 0;
         $scoreB = $b['similarity_percentage'] ?? 0;
@@ -289,234 +317,36 @@ if ($image_analysis_id > 0 && !empty($image_scores)) {
 }
 
 // ============================================================================
-// TEXT SEARCH MATCH SCORING & VISUAL INDICATORS
+// NORMAL FILTER / KEYWORD SEARCH
 // ============================================================================
-// Calculate match scores for text-based searches (keyword, category, location, etc.)
-$is_any_text_filter = !empty($search_query) || !empty($item_title) || !empty($category) || 
-                       !empty($location) || !empty($status) || !empty($date_from) || !empty($date_to);
+// Important: normal keyword/category/status/location/date filters should only
+// display normal item details. Ranking badges, similarity percentages, and
+// score breakdowns are reserved for Search by Image only.
 
-if ($image_analysis_id == 0 && $is_any_text_filter && !empty($search_results)) {
-    // Collect all active filter criteria for scoring
-    $active_criteria = [];
-    $filter_keywords = [];
-    
-    // Build search keywords from query and item_title
-    $filter_keywords = array_merge(
-        !empty($search_query) ? extractTextMatchTokens($search_query) : [],
-        !empty($item_title) ? extractTextMatchTokens($item_title) : []
-    );
-    
-    // Add category filter as keyword
-    if (!empty($category)) {
-        $active_criteria['category'] = strtolower(trim($category));
+if (!$is_image_search) {
+    foreach ($search_results as &$normalItem) {
+        unset(
+            $normalItem['similarity_percentage'],
+            $normalItem['match_level'],
+            $normalItem['match_reason'],
+            $normalItem['match_details'],
+            $normalItem['_text_match_score'],
+            $normalItem['is_best_text_match'],
+            $normalItem['is_highest_match']
+        );
     }
-    
-    // Add location filter keywords
-    if (!empty($location)) {
-        $location_keywords = extractTextMatchTokens($location);
-        $filter_keywords = array_merge($filter_keywords, $location_keywords);
-        $active_criteria['location'] = strtolower(trim($location));
-    }
-    
-    // Add status filter
-    if (!empty($status)) {
-        $active_criteria['status'] = strtolower(trim($status));
-    }
-    
-    // Add date range criteria
-    if (!empty($date_from) || !empty($date_to)) {
-        $active_criteria['date_range'] = true;
-    }
-    
-    // Remove duplicate keywords
-    $filter_keywords = array_unique($filter_keywords);
-    $filter_keywords = array_filter($filter_keywords, function($word) {
-        return strlen($word) > 2;
-    });
-    
-    // Calculate match score for each result
-    foreach ($search_results as &$item) {
-        $match_score = 0;
-        $match_reasons = [];
-        $match_details = [];
-        
-        // 1. Keyword match scoring (title + description + category)
-        if (!empty($filter_keywords)) {
-            $item_text = strtolower(
-                ($item['title'] ?? '') . ' ' . 
-                ($item['description'] ?? '') . ' ' . 
-                ($item['category'] ?? '')
-            );
-            
-            $matched_keywords = 0;
-            foreach ($filter_keywords as $keyword) {
-                if (strpos($item_text, $keyword) !== false) {
-                    $matched_keywords++;
-                    $match_reasons[] = "Contains keyword: $keyword";
-                }
-            }
-            
-            if ($matched_keywords > 0) {
-                $keyword_score = min(100, ($matched_keywords / count($filter_keywords)) * 100);
-                $match_score += $keyword_score * 0.5; // 50% weight for keywords
-                $match_details['keyword_score'] = round($keyword_score);
-                $match_details['matched_keywords'] = $matched_keywords;
-                $match_details['total_keywords'] = count($filter_keywords);
-            }
-        }
-        
-        // 2. Title exact/partial match boost
-        if (!empty($item_title) || !empty($search_query)) {
-            $title_lower = strtolower($item['title'] ?? '');
-            $search_terms = array_merge(
-                !empty($item_title) ? [$item_title] : [],
-                !empty($search_query) ? extractTextMatchTokens($search_query) : []
-            );
-            
-            $title_boost = 0;
-            foreach ($search_terms as $term) {
-                $term_lower = strtolower($term);
-                if (strpos($title_lower, $term_lower) !== false) {
-                    $title_boost = max($title_boost, 30);
-                    $match_reasons[] = "Title matches: $term";
-                }
-            }
-            $match_score += $title_boost;
-            $match_details['title_boost'] = $title_boost;
-        }
-        
-        // 3. Category match (30 points)
-        if (!empty($category) && strtolower($item['category'] ?? '') == strtolower($category)) {
-            $match_score += 30;
-            $match_reasons[] = "Category matches: $category";
-            $match_details['category_match'] = 30;
-        }
-        
-        // 4. Location match (20 points)
-        if (!empty($location)) {
-            $item_location = strtolower($item['found_location'] ?? $item['location'] ?? '');
-            $search_location = strtolower($location);
-            if (strpos($item_location, $search_location) !== false) {
-                $match_score += 20;
-                $match_reasons[] = "Location contains: $location";
-                $match_details['location_match'] = 20;
-            }
-        }
-        
-        // 5. Status match (15 points)
-        if (!empty($status) && strtolower($item['status'] ?? '') == strtolower($status)) {
-            $match_score += 15;
-            $match_reasons[] = "Status matches: $status";
-            $match_details['status_match'] = 15;
-        }
-        
-        // 6. Date range match (15 points)
-        if (!empty($date_from) || !empty($date_to)) {
-            $item_date = $item['date_found'] ?? $item['reported_date'] ?? '';
-            if (!empty($item_date)) {
-                $date_match = true;
-                if (!empty($date_from) && $item_date < $date_from) $date_match = false;
-                if (!empty($date_to) && $item_date > $date_to) $date_match = false;
-                
-                if ($date_match) {
-                    $match_score += 15;
-                    $match_reasons[] = "Within selected date range";
-                    $match_details['date_match'] = 15;
-                }
-            }
-        }
-        
-        // Normalize final score to 0-100
-        $item['similarity_percentage'] = min(100, max(0, $match_score));
-        $item['match_level'] = getMatchLevel($item['similarity_percentage']);
-        $item['match_reason'] = !empty($match_reasons) ? implode('; ', array_slice($match_reasons, 0, 3)) : 'Matches your search criteria';
-        $item['match_details'] = $match_details;
-        
-        // Mark if this is the best match (highest score)
-        $item['_text_match_score'] = $item['similarity_percentage'];
-    }
-    unset($item);
-    
-    // Sort by match score (highest first), then by reported date
-    usort($search_results, function($a, $b) {
-        $scoreA = $a['similarity_percentage'] ?? 0;
-        $scoreB = $b['similarity_percentage'] ?? 0;
-        
-        if ($scoreA === $scoreB) {
-            $dateA = strtotime($a['reported_date'] ?? $a['date_found'] ?? '0');
-            $dateB = strtotime($b['reported_date'] ?? $b['date_found'] ?? '0');
-            return $dateB <=> $dateA;
-        }
-        
-        return $scoreB <=> $scoreA;
-    });
-    
-    // Mark the top result as "Best Match"
-    if (!empty($search_results)) {
-        $search_results[0]['is_best_text_match'] = true;
-    }
-}
-
-// If using old text similarity calculation (keep for backward compatibility)
-if (!empty($search_query_tokens) && $image_analysis_id == 0 && empty($filter_keywords)) {
-    foreach ($search_results as &$item) {
-        $item['_text_match_score'] = calculateJaccardSimilarity($search_query_tokens, extractItemTextMatchTokens($item));
-    }
-    unset($item);
-
-    $search_results = array_values(array_filter($search_results, static function ($item) {
-        return (float)($item['_text_match_score'] ?? 0.0) > 0.0;
-    }));
-
-    usort($search_results, static function ($left, $right) {
-        $leftScore = (float)($left['_text_match_score'] ?? 0.0);
-        $rightScore = (float)($right['_text_match_score'] ?? 0.0);
-
-        if ($leftScore === $rightScore) {
-            return strcmp((string)($right['reported_date'] ?? ''), (string)($left['reported_date'] ?? ''));
-        }
-
-        return $rightScore <=> $leftScore;
-    });
-    
-    // Mark best match for Jaccard similarity
-    if (!empty($search_results)) {
-        $search_results[0]['is_best_text_match'] = true;
-    }
-}
-
-if ($image_analysis_id > 0 && empty($image_match_ids) && !empty($image_label_tokens)) {
-    foreach ($search_results as &$item) {
-        $item['_image_label_match_score'] = calculateJaccardSimilarity($image_label_tokens, extractItemTextMatchTokens($item));
-    }
-    unset($item);
-
-    $search_results = array_values(array_filter($search_results, static function ($item) {
-        return (float)($item['_image_label_match_score'] ?? 0.0) > 0.0;
-    }));
-
-    usort($search_results, static function ($left, $right) {
-        $leftScore = (float)($left['_image_label_match_score'] ?? 0.0);
-        $rightScore = (float)($right['_image_label_match_score'] ?? 0.0);
-
-        if ($leftScore === $rightScore) {
-            return strcmp((string)($right['reported_date'] ?? ''), (string)($left['reported_date'] ?? ''));
-        }
-
-        return $rightScore <=> $leftScore;
-    });
+    unset($normalItem);
 }
 
 $total_results = count($search_results);
 
-$has_filters = !empty($search_query) || !empty($category) || !empty($status) || !empty($location) ||
-               !empty($date_from) || !empty($date_to) || !empty($item_title) || $image_analysis_id > 0;
+$has_filters = $has_standard_filters || $is_image_search;
 
 // Determine if this is a text-based filter search (for UI messaging)
-$is_text_filter_search = $image_analysis_id == 0 && $has_filters;
+$is_text_filter_search = !$is_image_search && $has_standard_filters;
 
 // Log search only if there's a search query and no image search
-if (isset($_SESSION['userID']) && !empty($search_query) && $image_analysis_id == 0) {
+if (isset($_SESSION['userID']) && !empty($search_query) && !$is_image_search) {
     $log_stmt = $db->prepare("INSERT INTO search_history (userID, search_term, results_count) VALUES (?, ?, ?)");
     $log_stmt->execute([$_SESSION['userID'], $search_query, $total_results]);
 }
@@ -531,20 +361,123 @@ $categories = $cat_stmt->fetchAll();
 $loc_stmt = $db->query("SELECT DISTINCT found_location FROM items WHERE status IN ('lost', 'found') AND found_location IS NOT NULL AND found_location != '' ORDER BY found_location LIMIT 20");
 $locations = $loc_stmt->fetchAll();
 
-// Get image analysis data if available
-$image_analysis_data = null;
-if ($image_analysis_id > 0) {
-    $stmt = $db->prepare("SELECT * FROM image_analysis WHERE analysis_id = ?");
-    $stmt->execute([$image_analysis_id]);
-    $image_analysis_data = $stmt->fetch();
+// Helper function for match level
+function isConfidentStoredImageMatch(array $match) {
+    if (array_key_exists('family_allowed', $match) && !$match['family_allowed']) {
+        return false;
+    }
+
+    $finalScore = (float) ($match['final_score'] ?? $match['similarity_percentage'] ?? 0);
+    $imageScore = (float) ($match['image_score'] ?? $match['visual_score'] ?? 0);
+    $imaggaScore = (float) ($match['imagga_score'] ?? 0);
+    $jaccardScore = (float) ($match['jaccard_score'] ?? 0);
+    $categoryScore = (float) ($match['category_score'] ?? 0);
+    $orbScore = (float) ($match['orb_score'] ?? 0);
+    $verifiedMatches = (int) ($match['verified_matches'] ?? 0);
+    $matchedTags = $match['matched_tags'] ?? [];
+
+    if ($imageScore < MIN_IMAGE_RESULT_SCORE) {
+        return false;
+    }
+
+    $strongVisual = (
+        ($imageScore >= 70 && $verifiedMatches >= 5 && $orbScore >= 30)
+        || ($imageScore >= 60 && $verifiedMatches >= 6 && $orbScore >= 25)
+        || ($imageScore >= 55 && $verifiedMatches >= 5 && $orbScore >= 40)
+        || ($imageScore >= 55 && $verifiedMatches >= 8 && $orbScore >= 25)
+    );
+
+    $strongSemantic = (
+        $imaggaScore >= 60
+        || ($imaggaScore >= 45 && $jaccardScore >= 12 && ($categoryScore >= 100 || !empty($matchedTags)))
+    );
+
+    return $finalScore >= 55 || $strongVisual || $strongSemantic;
 }
 
-// Helper function for match level
 function getMatchLevel($score) {
+    if ($score >= 85) return 'Highly Matched';
     if ($score >= 70) return 'Very Likely Match';
-    if ($score >= 45) return 'Possible Match';
-    if ($score >= 25) return 'Low Match';
+    if ($score >= 50) return 'Possible Match';
+    if ($score >= 30) return 'Low Match';
     return 'Potential Match';
+}
+
+function colorsAreCompatible(string $referenceColor, string $candidateColor): bool
+{
+    $referenceFamily = resolveColorFamily($referenceColor);
+    if ($referenceFamily === '') {
+        return true;
+    }
+
+    $candidateFamily = resolveColorFamily($candidateColor);
+    if ($candidateFamily === '') {
+        return false;
+    }
+
+    return $referenceFamily === $candidateFamily;
+}
+
+function resolveColorFamily(string $color): string
+{
+    $normalizedColor = normalizeColorPhrase($color);
+    if ($normalizedColor === '') {
+        return '';
+    }
+
+    foreach (getColorFamilyAliases() as $family => $aliases) {
+        foreach ($aliases as $alias) {
+            $normalizedAlias = normalizeColorPhrase($alias);
+            if ($normalizedAlias !== '' && colorPhraseContains($normalizedColor, $normalizedAlias)) {
+                return $family;
+            }
+        }
+    }
+
+    return '';
+}
+
+function getColorFamilyAliases(): array
+{
+    return [
+        'black' => ['black', 'jet black', 'charcoal', 'dark black'],
+        'white' => ['white', 'off white', 'ivory', 'cream'],
+        'gray' => ['gray', 'grey', 'ash', 'slate', 'light gray', 'light grey'],
+        'red' => ['red', 'maroon', 'burgundy', 'crimson'],
+        'pink' => ['pink', 'rose', 'fuchsia', 'magenta'],
+        'orange' => ['orange', 'coral', 'peach'],
+        'yellow' => ['yellow', 'mustard'],
+        'green' => ['green', 'olive', 'lime', 'mint', 'emerald'],
+        'blue' => ['blue', 'navy', 'sky blue', 'light blue', 'royal blue', 'cyan', 'teal', 'turquoise'],
+        'purple' => ['purple', 'violet', 'lavender', 'lilac'],
+        'brown' => ['brown', 'tan', 'beige', 'khaki', 'camel'],
+        'gold' => ['gold', 'golden'],
+        'silver' => ['silver', 'metallic silver'],
+    ];
+}
+
+function normalizeColorPhrase(string $value): string
+{
+    $value = strtolower(trim($value));
+    $value = preg_replace('/[^a-z0-9]+/i', ' ', $value) ?? '';
+    $value = preg_replace('/\s+/', ' ', $value) ?? '';
+    return trim($value);
+}
+
+function colorPhraseContains(string $normalizedText, string $normalizedAlias): bool
+{
+    if ($normalizedText === '' || $normalizedAlias === '') {
+        return false;
+    }
+
+    if (strpos(' ' . $normalizedText . ' ', ' ' . $normalizedAlias . ' ') !== false) {
+        return true;
+    }
+
+    $collapsedText = str_replace(' ', '', $normalizedText);
+    $collapsedAlias = str_replace(' ', '', $normalizedAlias);
+
+    return $collapsedAlias !== '' && strpos($collapsedText, $collapsedAlias) !== false;
 }
 ?>
 
@@ -1102,7 +1035,7 @@ function getMatchLevel($score) {
         <!-- Search Results -->
         <div class="col-lg-8 col-xl-9">
             <!-- Image Search Banner -->
-<?php if ($image_analysis_data): ?>
+<?php if ($is_image_search || ($image_analysis_id > 0 && $image_analysis_data)): ?>
 <div class="image-search-banner">
     <div class="search-banner-head">
         <div class="search-banner-summary">
@@ -1110,100 +1043,18 @@ function getMatchLevel($score) {
                 <i class="fas fa-brain"></i>
             </span>
             <div class="search-banner-copy">
-                <div class="search-banner-title-row">
-                    <strong class="search-banner-title">AI Image Search Results</strong>
-                    <span class="ai-badge">AI-Powered</span>
-                </div>
-                <div class="detected-labels">
-                    <span class="search-banner-meta-label">Detected:</span>
-                    <?php
-                    $labels = json_decode($image_analysis_data['labels'], true);
-                    if (is_array($labels) && !empty($labels)):
-                        foreach($labels as $label):
-                    ?>
-                        <span class="detected-label"><?= htmlspecialchars($label) ?></span>
-                    <?php endforeach; else: ?>
-                        <span class="detected-label">Visual similarity matches</span>
-                    <?php endif; ?>
-                </div>
+                <strong class="search-banner-title">AI Image Search</strong>
+                <p class="mb-0 text-muted">
+                    <?= htmlspecialchars($image_search_notice !== '' ? $image_search_notice : 'Showing the best AI match for the uploaded image.') ?>
+                </p>
             </div>
         </div>
         <a href="<?= $base_url ?>search.php" class="btn btn-sm btn-light search-banner-action" onclick="clearImageSearch()">
             <i class="fas fa-times"></i> Clear Image Search
         </a>
     </div>
-    <?php 
-    // Get top match category from analysis
-    $analysisData = json_decode($image_analysis_data['labels'], true);
-    $topCategory = is_array($analysisData) && isset($analysisData['top_category']) ? $analysisData['top_category'] : '';
-    if ($topCategory): 
-    ?>
-    <div class="alert alert-info mt-2 mb-0">
-        <i class="fas fa-info-circle me-2"></i>
-        Showing items matching <strong><?= htmlspecialchars($topCategory) ?></strong> category (based on top match)
-    </div>
-    <?php endif; ?>
-    <?php if ($image_search_notice !== ''): ?>
-        <p class="small text-muted mt-2 mb-0"><?= htmlspecialchars($image_search_notice) ?></p>
-    <?php endif; ?>
 </div>
 <?php endif; ?>
-
-            <!-- Text Search Banner -->
-            <?php if ($is_text_filter_search && !empty($search_results) && $image_analysis_id == 0): ?>
-            <div class="image-search-banner image-search-banner--text">
-                <div class="search-banner-head">
-                    <div class="search-banner-summary">
-                        <span class="search-banner-icon" aria-hidden="true">
-                            <i class="fas fa-search"></i>
-                        </span>
-                        <div class="search-banner-copy">
-                            <div class="search-banner-title-row">
-                                <strong class="search-banner-title">Text Filter Search Results</strong>
-                                <span class="text-match-badge"><i class="fas fa-filter"></i> Filtered Search</span>
-                            </div>
-                            <div class="detected-labels">
-                                <span class="search-banner-meta-label">Active filters:</span>
-                                <?php if(!empty($search_query)): ?>
-                                    <span class="filter-tag"><i class="fas fa-keyboard"></i> Keyword: <?= htmlspecialchars(substr($search_query, 0, 30)) ?></span>
-                                <?php endif; ?>
-                                <?php if(!empty($item_title)): ?>
-                                    <span class="filter-tag"><i class="fas fa-heading"></i> Title: <?= htmlspecialchars($item_title) ?></span>
-                                <?php endif; ?>
-                                <?php if(!empty($category)): ?>
-                                    <span class="filter-tag"><i class="fas fa-tag"></i> Category: <?= htmlspecialchars($category) ?></span>
-                                <?php endif; ?>
-                                <?php if(!empty($status)): ?>
-                                    <span class="filter-tag"><i class="fas fa-flag"></i> Status: <?= htmlspecialchars($status) ?></span>
-                                <?php endif; ?>
-                                <?php if(!empty($location)): ?>
-                                    <span class="filter-tag"><i class="fas fa-map-marker-alt"></i> Location: <?= htmlspecialchars($location) ?></span>
-                                <?php endif; ?>
-                                <?php if(!empty($date_from) || !empty($date_to)): ?>
-                                    <span class="filter-tag"><i class="fas fa-calendar"></i> Date: <?= $date_from ?: 'any' ?> to <?= $date_to ?: 'any' ?></span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                    <a href="<?= $base_url ?>search.php" class="btn btn-sm btn-outline-secondary search-banner-action" onclick="clearAllFilters()">
-                        <i class="fas fa-times"></i> Clear All Filters
-                    </a>
-                </div>
-                <div class="alert alert-warning mt-2 mb-0" style="background: #fff8e7; border-color: #ffd699;">
-                    <i class="fas fa-chart-line me-2" style="color: #FF8C00;"></i>
-                    Results are ranked by match relevance. Items with higher match scores appear first.
-                </div>
-            </div>
-            <?php endif; ?>
-            
-            <!-- Filter Info Banner for Image Search -->
-            <?php if ($image_analysis_id > 0 && $highest_match && !empty($search_results)): ?>
-            <div class="filter-info-banner">
-                <i class="fas fa-filter"></i>
-                <strong>Smart Filtering Active:</strong> Showing only items that match the category "<strong><?= htmlspecialchars($highest_category) ?></strong>" or contain similar keywords to the top match "<strong><?= htmlspecialchars(substr($highest_match['title'] ?? '', 0, 40)) ?></strong>".
-                <a href="<?= $base_url ?>search.php?image_analysis=<?= $image_analysis_id ?>" class="float-end text-decoration-none">Show All</a>
-            </div>
-            <?php endif; ?>
 
             <div class="card">
                 <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -1212,7 +1063,7 @@ function getMatchLevel($score) {
                 </div>
                 <div class="card-body">
                     <!-- Active Filters Display -->
-                    <?php if($has_filters): ?>
+                    <?php if($has_filters && !$is_image_search): ?>
                         <?php
                             $active_filters = array();
                             if(!empty($search_query)) $active_filters[] = "Keyword: " . htmlspecialchars($search_query);
@@ -1222,7 +1073,6 @@ function getMatchLevel($score) {
                             if(!empty($location)) $active_filters[] = "Location: " . htmlspecialchars($location);
                             if(!empty($date_from)) $active_filters[] = "From: " . htmlspecialchars($date_from);
                             if(!empty($date_to)) $active_filters[] = "To: " . htmlspecialchars($date_to);
-                            if($image_analysis_id > 0) $active_filters[] = "AI Image Search";
                         ?>
                         <?php if(!empty($active_filters)): ?>
                             <div class="mb-3">
@@ -1235,7 +1085,7 @@ function getMatchLevel($score) {
                                 </div>
                             </div>
                         <?php endif; ?>
-                    <?php else: ?>
+                    <?php elseif(!$is_image_search): ?>
                         <div class="alert alert-info mb-3">
                             <i class="fas fa-info-circle"></i> Showing all items. Use filters to narrow down your search.
                         </div>
@@ -1256,23 +1106,15 @@ function getMatchLevel($score) {
                         </div>
                     <?php else: ?>
                         <div class="row">
-                            <?php $index = 0; foreach($search_results as $item): ?>
+                            <?php foreach($search_results as $item): ?>
                             <div class="col-md-6 col-xl-4">
                                 <div class="card item-card h-100 
-                                    <?= isset($item['is_highest_match']) && $item['is_highest_match'] ? 'highest-match' : '' ?> 
-                                    <?= isset($item['is_best_text_match']) && $item['is_best_text_match'] ? 'best-text-match' : '' ?>">
-                                    <!-- Top Match Badge -->
-                                    <?php if (isset($item['is_highest_match']) && $item['is_highest_match']): ?>
+                                    <?= $is_image_search && isset($item['is_highest_match']) && $item['is_highest_match'] ? 'highest-match' : '' ?> 
+                                    ">
+                                    <!-- Best Match Badge - Search by Image only -->
+                                    <?php if ($is_image_search && isset($item['is_highest_match']) && $item['is_highest_match']): ?>
                                         <div class="top-match-badge">
                                             <i class="fas fa-crown me-1"></i> Best Match
-                                        </div>
-                                    <?php elseif (isset($item['is_best_text_match']) && $item['is_best_text_match']): ?>
-                                        <div class="top-match-badge" style="background: linear-gradient(135deg, #FF8C00, #FF5722); color: white;">
-                                            <i class="fas fa-trophy me-1"></i> Top Match
-                                        </div>
-                                    <?php elseif ($index == 0 && $image_analysis_id > 0 && isset($item['similarity_percentage']) && $item['similarity_percentage'] > 0): ?>
-                                        <div class="top-match-badge">
-                                            <i class="fas fa-trophy me-1"></i> Top Match
                                         </div>
                                     <?php endif; ?>
                                     
@@ -1334,104 +1176,23 @@ function getMatchLevel($score) {
                                             <?php endif; ?>
                                         </p>
                                         
-                                        <!-- Similarity Score Section - Show for BOTH image search AND text filter search -->
-                                        <?php if ((($image_analysis_id > 0 || $is_text_filter_search) && isset($item['similarity_percentage']) && $item['similarity_percentage'] > 0) || 
-                                                  (isset($item['_text_match_score']) && $item['_text_match_score'] > 0)): 
-                                            $match_score = $item['similarity_percentage'] ?? ($item['_text_match_score'] * 100 ?? 0);
-                                            $score_type = $image_analysis_id > 0 ? 'AI Similarity' : 'Relevance Score';
+                                        <!-- AI Similarity - Search by Image only -->
+                                        <?php if ($is_image_search && isset($item['similarity_percentage']) && $item['similarity_percentage'] > 0):
+                                            $match_score = (float) $item['similarity_percentage'];
                                         ?>
                                         <div class="similarity-container">
                                             <div class="similarity-label">
-                                                <span><i class="fas fa-chart-line"></i> <?= $score_type ?></span>
+                                                <span><i class="fas fa-chart-line"></i> AI Similarity</span>
                                                 <span class="similarity-percentage"><?= round($match_score) ?>%</span>
                                             </div>
                                             <div class="progress-bar-custom">
-                                                <div class="progress-fill <?= $match_score >= 70 ? 'progress-high' : ($match_score >= 45 ? 'progress-medium' : ($match_score >= 25 ? 'progress-low' : 'progress-potential')) ?>" 
-                                                     style="width: <?= $match_score ?>%"></div>
-                                            </div>
-                                            
-                                            <!-- Score Breakdown for Text Search -->
-                                            <?php if ($is_text_filter_search && isset($item['match_details']) && !empty($item['match_details'])): ?>
-                                            <div class="score-breakdown">
-                                                <?php if (isset($item['match_details']['keyword_score']) && $item['match_details']['keyword_score'] > 0): ?>
-                                                    <span class="score-item keyword"><i class="fas fa-keyboard"></i> Keyword: <?= round($item['match_details']['keyword_score']) ?>%</span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['match_details']['title_boost']) && $item['match_details']['title_boost'] > 0): ?>
-                                                    <span class="score-item title"><i class="fas fa-heading"></i> Title: +<?= $item['match_details']['title_boost'] ?></span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['match_details']['category_match']) && $item['match_details']['category_match'] > 0): ?>
-                                                    <span class="score-item cat"><i class="fas fa-tag"></i> Category: +<?= $item['match_details']['category_match'] ?></span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['match_details']['location_match']) && $item['match_details']['location_match'] > 0): ?>
-                                                    <span class="score-item location"><i class="fas fa-map-marker-alt"></i> Location: +<?= $item['match_details']['location_match'] ?></span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['match_details']['status_match']) && $item['match_details']['status_match'] > 0): ?>
-                                                    <span class="score-item status"><i class="fas fa-flag"></i> Status: +<?= $item['match_details']['status_match'] ?></span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['match_details']['date_match']) && $item['match_details']['date_match'] > 0): ?>
-                                                    <span class="score-item date"><i class="fas fa-calendar"></i> Date: +<?= $item['match_details']['date_match'] ?></span>
-                                                <?php endif; ?>
-                                            </div>
-                                            <?php endif; ?>
-                                            
-                                            <!-- Score Breakdown for Image Search -->
-                                            <?php if ($image_analysis_id > 0 && isset($item['visual_score']) && $item['visual_score'] > 0): ?>
-                                            <div class="score-breakdown">
-                                                <?php if (isset($item['visual_score']) && $item['visual_score'] > 0): ?>
-                                                    <span class="score-item visual"><i class="fas fa-image"></i> Visual: <?= round($item['visual_score']) ?>%</span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['title_score']) && $item['title_score'] > 0): ?>
-                                                    <span class="score-item title"><i class="fas fa-heading"></i> Title: <?= round($item['title_score']) ?>%</span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['description_score']) && $item['description_score'] > 0): ?>
-                                                    <span class="score-item desc"><i class="fas fa-align-left"></i> Desc: <?= round($item['description_score']) ?>%</span>
-                                                <?php endif; ?>
-                                                <?php if (isset($item['category_score']) && $item['category_score'] > 0): ?>
-                                                    <span class="score-item cat"><i class="fas fa-tag"></i> Category: <?= round($item['category_score']) ?>%</span>
-                                                <?php endif; ?>
-                                            </div>
-                                            <?php endif; ?>
-                                            
-                                            <!-- Match Reason -->
-                                            <?php if (isset($item['match_reason']) && !empty($item['match_reason'])): ?>
-                                                <div class="match-reason">
-                                                    <i class="fas fa-info-circle me-1"></i> 
-                                                    <?= htmlspecialchars($item['match_reason']) ?>
-                                                </div>
-                                            <?php endif; ?>
-                                            
-                                            <div class="mt-2">
-                                                <span class="match-badge <?= $match_score >= 70 ? 'match-high' : ($match_score >= 45 ? 'match-medium' : ($match_score >= 25 ? 'match-low' : 'match-potential')) ?>">
-                                                    <?= isset($item['match_level']) ? $item['match_level'] : getMatchLevel($match_score) ?>
-                                                </span>
-                                                <?php if (isset($item['is_highest_match']) && $item['is_highest_match']): ?>
-                                                    <span class="ai-badge"><i class="fas fa-star"></i> Best Match</span>
-                                                <?php elseif (isset($item['is_best_text_match']) && $item['is_best_text_match']): ?>
-                                                    <span class="text-match-badge"><i class="fas fa-star"></i> Top Match</span>
-                                                <?php elseif ($index < 3 && ($image_analysis_id > 0 || $is_text_filter_search)): ?>
-                                                    <span class="ai-badge"><i class="fas fa-star"></i> Recommended</span>
-                                                <?php endif; ?>
-                                                
-                                                <!-- Show matched keywords count for text search -->
-                                                <?php if ($is_text_filter_search && isset($item['match_details']['matched_keywords']) && $item['match_details']['matched_keywords'] > 0): ?>
-                                                    <span class="matching-badge">
-                                                        <i class="fas fa-check-circle"></i> <?= $item['match_details']['matched_keywords'] ?>/<?= $item['match_details']['total_keywords'] ?> keywords
-                                                    </span>
-                                                <?php endif; ?>
+                                                <div class="progress-fill <?= $match_score >= 70 ? 'progress-high' : ($match_score >= 45 ? 'progress-medium' : ($match_score >= 25 ? 'progress-low' : 'progress-potential')) ?>"
+                                                     style="width: <?= min(100, max(0, $match_score)) ?>%"></div>
                                             </div>
                                         </div>
                                         <?php endif; ?>
                                         
                                         <!-- Show matching criteria note for related items in image search -->
-                                        <?php if ($image_analysis_id > 0 && $highest_match && $item['item_id'] != $highest_match['item_id']): ?>
-                                            <div class="match-reason mt-2" style="background: #e8f5e9;">
-                                                <i class="fas fa-link me-1"></i>
-                                                Related to: <strong><?= htmlspecialchars(substr($highest_match['title'] ?? '', 0, 30)) ?></strong>
-                                                <?php if ($item['category'] == $highest_category): ?>
-                                                    <span class="badge bg-info ms-1">Same Category</span>
-                                                <?php endif; ?>
-                                            </div>
-                                        <?php endif; ?>
                                     </div>
 
                                     <div class="card-footer bg-transparent">
@@ -1443,7 +1204,7 @@ function getMatchLevel($score) {
                                     </div>
                                 </div>
                             </div>
-                            <?php $index++; endforeach; ?>
+                            <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
                 </div>
