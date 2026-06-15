@@ -21,6 +21,8 @@ const IMAGGA_MIN_CONFIDENCE = 40.0;
 const IMAGGA_TAG_CACHE_TTL = 2592000; // 30 days
 const IMAGGA_CONNECT_TIMEOUT_SECONDS = 4;
 const IMAGGA_TOTAL_TIMEOUT_SECONDS = 8;
+const PYTHON_DISCOVERY_TIMEOUT_SECONDS = 2.0;
+const PYTHON_COMPARE_TIMEOUT_SECONDS = 4.0;
 const IMAGE_WEIGHT = 0.40;
 const IMAGGA_WEIGHT = 0.30;
 const JACCARD_WEIGHT = 0.20;
@@ -225,7 +227,8 @@ try {
             'color' => (string) ($item['color'] ?? ''),
             'status' => (string) ($item['status'] ?? ''),
             'image_url' => (string) ($item['image_url'] ?? ''),
-            'image_score' => $imageScore,
+            // Use the overall score for UI compatibility while keeping the raw visual score separately.
+            'image_score' => $finalScore,
             'imagga_score' => $imaggaScore,
             'jaccard_score' => $jaccardScore,
             'category_score' => $categoryScore,
@@ -234,7 +237,7 @@ try {
             'item_object_families' => array_values($itemObjectFamilies),
             'family_allowed' => $sameObjectFamily,
             'final_score' => $finalScore,
-            'match_level' => getMatchLevel($imageScore),
+            'match_level' => getMatchLevel($finalScore),
             'orb_score' => round(clampPercent($imageMetrics['orb_score'] ?? 0), 2),
             'histogram_score' => round(clampPercent($imageMetrics['histogram_score'] ?? 0), 2),
             'verified_matches' => max(0, (int) ($imageMetrics['verified_matches'] ?? 0)),
@@ -244,7 +247,7 @@ try {
             'match_reason' => buildMatchReason($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $matchedTags),
             // Compatibility fields used by the existing search UI.
             'visual_score' => $imageScore,
-            'similarity_percentage' => $imageScore,
+            'similarity_percentage' => $finalScore,
         ];
     }
 
@@ -253,14 +256,14 @@ try {
     }
 
     usort($results, static function (array $left, array $right): int {
-        $scoreComparison = ($right['image_score'] <=> $left['image_score']);
+        $scoreComparison = ($right['final_score'] <=> $left['final_score']);
         if ($scoreComparison !== 0) {
             return $scoreComparison;
         }
 
-        $finalComparison = ($right['final_score'] <=> $left['final_score']);
-        if ($finalComparison !== 0) {
-            return $finalComparison;
+        $visualComparison = ($right['visual_score'] <=> $left['visual_score']);
+        if ($visualComparison !== 0) {
+            return $visualComparison;
         }
 
         $imaggaComparison = ($right['imagga_score'] <=> $left['imagga_score']);
@@ -287,7 +290,7 @@ try {
         'matches' => $relevantResults,
         'total_matches' => count($relevantResults),
         'top_match_category' => $topMatch['category'] ?? null,
-        'top_match_score' => isset($topMatch['image_score']) ? round((float) $topMatch['image_score'], 2) : 0.0,
+        'top_match_score' => isset($topMatch['final_score']) ? round((float) $topMatch['final_score'], 2) : 0.0,
         'message' => !empty($relevantResults)
             ? 'Found the best confident match for the uploaded image.'
             : 'No confident match was found for the uploaded image.',
@@ -867,7 +870,7 @@ function isRelevantMatch(array $result): bool
     $matchedTags = $result['matched_tags'] ?? [];
     $sameObjectFamily = !empty($result['family_allowed']);
 
-    if ($imageScore < MIN_DISPLAY_IMAGE_SCORE) {
+    if ($imageScore < MIN_DISPLAY_IMAGE_SCORE && !($strongSemantic && $finalScore >= MIN_MATCH_SCORE)) {
         return false;
     }
 
@@ -968,7 +971,7 @@ function calculateVisualSimilarity(string $imageOne, string $imageTwo, array $py
     }
 
     try {
-        $result = runCommand(array_merge($pythonCommand, [$scriptPath, $imageOne, $imageTwo]));
+        $result = runCommand(array_merge($pythonCommand, [$scriptPath, $imageOne, $imageTwo]), PYTHON_COMPARE_TIMEOUT_SECONDS);
     } catch (Throwable $exception) {
         error_log('Failed to execute compare.py: ' . $exception->getMessage());
         return $defaultMetrics;
@@ -1058,7 +1061,7 @@ function findPythonCommand(): ?array
 
     foreach ($candidates as $candidate) {
         try {
-            $result = runCommand(array_merge($candidate, ['--version']));
+            $result = runCommand(array_merge($candidate, ['--version']), PYTHON_DISCOVERY_TIMEOUT_SECONDS);
         } catch (Throwable $exception) {
             continue;
         }
@@ -1073,7 +1076,7 @@ function findPythonCommand(): ?array
     return null;
 }
 
-function runCommand(array $commandParts): array
+function runCommand(array $commandParts, float $timeoutSeconds = 5.0): array
 {
     $command = implode(' ', array_map(static function ($part): string {
         return escapeshellarg((string) $part);
@@ -1093,11 +1096,72 @@ function runCommand(array $commandParts): array
         }
 
         fclose($pipes[0]);
-        $stdout = stream_get_contents($pipes[1]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        $stdout = '';
+        $stderr = '';
+        $startedAt = microtime(true);
+        $timedOut = false;
+
+        while (true) {
+            $status = proc_get_status($process);
+            $running = (bool) ($status['running'] ?? false);
+
+            $readStreams = [];
+            if (is_resource($pipes[1]) && !feof($pipes[1])) {
+                $readStreams[] = $pipes[1];
+            }
+            if (is_resource($pipes[2]) && !feof($pipes[2])) {
+                $readStreams[] = $pipes[2];
+            }
+
+            if (!empty($readStreams)) {
+                $write = null;
+                $except = null;
+                @stream_select($readStreams, $write, $except, 0, 200000);
+
+                foreach ($readStreams as $stream) {
+                    $chunk = stream_get_contents($stream);
+                    if ($chunk === false || $chunk === '') {
+                        continue;
+                    }
+
+                    if ($stream === $pipes[1]) {
+                        $stdout .= $chunk;
+                    } else {
+                        $stderr .= $chunk;
+                    }
+                }
+            } elseif ($running) {
+                usleep(100000);
+            }
+
+            if (!$running) {
+                break;
+            }
+
+            if ($timeoutSeconds > 0 && (microtime(true) - $startedAt) >= $timeoutSeconds) {
+                $timedOut = true;
+                @proc_terminate($process);
+
+                $statusAfterTerminate = proc_get_status($process);
+                if (!empty($statusAfterTerminate['running'])) {
+                    @proc_terminate($process, 9);
+                }
+                break;
+            }
+        }
+
+        $stdout .= stream_get_contents($pipes[1]) ?: '';
+        $stderr .= stream_get_contents($pipes[2]) ?: '';
         fclose($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[2]);
         $exitCode = proc_close($process);
+
+        if ($timedOut) {
+            throw new RuntimeException('Command timed out after ' . $timeoutSeconds . ' seconds: ' . $command);
+        }
 
         return [
             'command' => $command,
