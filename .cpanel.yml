@@ -1,0 +1,8 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/reclnebk/public_html
+    - /bin/mkdir -p "$DEPLOYPATH"
+    - /usr/bin/rsync -a --delete --exclude='.git/' --exclude='.cpanel.yml' --exclude='.env' --exclude='vendor/' --exclude='android-user-app/' --exclude='assets/uploads/' --exclude='storage/sessions/' --exclude='README.md' --exclude='*.log' --exclude='register*_cookies.txt' --exclude='register_test_page.html' ./ "$DEPLOYPATH/"
+    - /bin/mkdir -p "$DEPLOYPATH/assets/uploads" "$DEPLOYPATH/storage/sessions"
+    - cd "$DEPLOYPATH" && if [ -x /opt/cpanel/composer/bin/composer ]; then /opt/cpanel/composer/bin/composer install --no-dev --optimize-autoloader; elif command -v composer >/dev/null 2>&1; then composer install --no-dev --optimize-autoloader; else echo "Composer not found on server; skipping vendor install."; fi
