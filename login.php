@@ -102,6 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             max-width: 560px;
             margin: 0 auto;
         }
+        .password-field-group .form-control {
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+        .password-field-group .btn {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            min-width: 52px;
+        }
     </style>
 </head>
 <body class="auth-page">
@@ -133,9 +142,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             <div class="mb-3">
                                 <label for="password" class="form-label">Password</label>
-                                <div class="input-group">
+                                <div class="input-group password-field-group">
                                     <span class="input-group-text"><i class="fas fa-lock"></i></span>
                                     <input type="password" class="form-control" id="password" name="password" required>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-secondary password-toggle"
+                                        data-target="password"
+                                        aria-label="Show password"
+                                        title="Show password"
+                                    >
+                                        <i class="fas fa-eye"></i>
+                                    </button>
                                 </div>
                             </div>
                             <div class="text-end mb-3">
@@ -162,5 +180,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </main>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function syncPasswordToggle(button, input) {
+            const icon = button ? button.querySelector('i') : null;
+            if (!button || !input || !icon) {
+                return;
+            }
+
+            const isVisible = input.type === 'text';
+            icon.className = isVisible ? 'fas fa-eye-slash' : 'fas fa-eye';
+            button.setAttribute('aria-label', isVisible ? 'Hide password' : 'Show password');
+            button.setAttribute('title', isVisible ? 'Hide password' : 'Show password');
+        }
+
+        document.querySelectorAll('.password-toggle').forEach(function(button) {
+            const input = document.getElementById(button.dataset.target || '');
+            if (!input) {
+                return;
+            }
+
+            syncPasswordToggle(button, input);
+
+            button.addEventListener('click', function() {
+                input.type = input.type === 'password' ? 'text' : 'password';
+                syncPasswordToggle(button, input);
+            });
+        });
+    </script>
 </body>
 </html>

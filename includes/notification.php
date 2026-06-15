@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/mail.php';
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/imagga_similarity.php';
+require_once __DIR__ . '/item_matcher.php';
 
 class NotificationSystem {
     private $db;
@@ -16,13 +17,7 @@ class NotificationSystem {
      */
     public function send($userId, $title, $message, $type = 'info', $sendEmail = true) {
         try {
-            // Save to database - using correct column names
-            $stmt = $this->db->prepare("
-                INSERT INTO notifications (user_id, title, message, type, is_read, created_at) 
-                VALUES (?, ?, ?, ?, 0, NOW())
-            ");
-            $stmt->execute([$userId, $title, $message, $type]);
-            $notificationId = $this->db->lastInsertId();
+            $notificationId = $this->insertNotificationRecord($userId, $title, $message, $type);
             
             // Send email if enabled
             if ($sendEmail) {
@@ -41,19 +36,17 @@ class NotificationSystem {
      */
     private function sendEmail($userId, $title, $message, $type) {
         try {
-            // Get user email and notification preferences
-            $stmt = $this->db->prepare("
-                SELECT email, name, email_notifications, notification_email 
-                FROM users WHERE user_id = ?
-            ");
-            $stmt->execute([$userId]);
-            $user = $stmt->fetch();
+            if (class_exists('EnvLoader')) {
+                EnvLoader::load();
+            }
+
+            $user = $this->getUserNotificationRecipient($userId);
             
             if (!$user || !$user['email_notifications']) {
                 return false;
             }
             
-            $toEmail = $user['notification_email'] ?? $user['email'];
+            $toEmail = $this->resolveNotificationEmail($user);
             $emailBody = $this->getEmailTemplate($user['name'], $title, $message, $type);
             $subject = "[Reclaim System] " . $title;
             
@@ -67,6 +60,37 @@ class NotificationSystem {
             error_log("Email failed: " . $e->getMessage());
             return false;
         }
+    }
+
+    private function insertNotificationRecord($userId, $title, $message, $type) {
+        $stmt = $this->db->prepare("
+            INSERT INTO notifications (user_id, title, message, type, is_read, created_at)
+            VALUES (?, ?, ?, ?, 0, NOW())
+        ");
+        $stmt->execute([(int) $userId, $title, $message, $type]);
+
+        return $this->db->lastInsertId();
+    }
+
+    private function getUserNotificationRecipient($userId) {
+        $stmt = $this->db->prepare("
+            SELECT user_id, email, name, email_notifications, notification_email
+            FROM users
+            WHERE user_id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([(int) $userId]);
+
+        return $stmt->fetch();
+    }
+
+    private function resolveNotificationEmail(array $user) {
+        $notificationEmail = trim((string) ($user['notification_email'] ?? ''));
+        if ($notificationEmail !== '') {
+            return $notificationEmail;
+        }
+
+        return trim((string) ($user['email'] ?? ''));
     }
     
     /**
@@ -229,6 +253,330 @@ class NotificationSystem {
             $message = "You have successfully reported a {$status} item: '{$item['title']}'. Our team will review it.";
             $this->send($reporterId, $title, $message, 'success');
         }
+    }
+
+    /**
+     * Compare a newly reported item against open opposite-status items and notify the matched user.
+     */
+    public function processAutomaticItemMatches($itemId) {
+        $matcher = new AutomaticItemMatchService($this->db);
+        $matches = $matcher->findMatchesForItem((int) $itemId);
+
+        if (empty($matches)) {
+            return 0;
+        }
+
+        $sourceItem = $this->getMatchItemById((int) $itemId);
+        if (!$sourceItem) {
+            return 0;
+        }
+
+        $notificationCount = 0;
+
+        foreach ($matches as $match) {
+            $matchedItem = $match['item'] ?? null;
+            if (!is_array($matchedItem) || empty($matchedItem['item_id'])) {
+                continue;
+            }
+
+            $upsert = $this->upsertItemSimilarityMatch($sourceItem, $matchedItem, $match);
+            if (!$upsert['saved']) {
+                continue;
+            }
+
+            if ($upsert['is_new']) {
+                if ($this->sendAutomaticMatchNotification($sourceItem, $matchedItem, $match)) {
+                    $notificationCount++;
+                }
+            }
+        }
+
+        return $notificationCount;
+    }
+
+    private function getMatchItemById($itemId) {
+        $stmt = $this->db->prepare("
+            SELECT
+                item_id,
+                user_id,
+                reported_by,
+                COALESCE(reported_by, user_id) AS owner_user_id,
+                title,
+                description,
+                category,
+                brand,
+                color,
+                location,
+                found_location,
+                delivery_location,
+                date_found,
+                status,
+                image_url,
+                image_tags,
+                reported_date
+            FROM items
+            WHERE item_id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([(int) $itemId]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    private function upsertItemSimilarityMatch(array $sourceItem, array $matchedItem, array $match) {
+        $sourceItemId = (int) ($sourceItem['item_id'] ?? 0);
+        $matchedItemId = (int) ($matchedItem['item_id'] ?? 0);
+        $existingPair = $this->findExistingItemSimilarityPair($sourceItemId, $matchedItemId);
+        $isDirectPair = !$existingPair
+            || (
+                (int) ($existingPair['source_item_id'] ?? 0) === $sourceItemId
+                && (int) ($existingPair['matched_item_id'] ?? 0) === $matchedItemId
+            );
+
+        $payload = [
+            'source_item_id' => $sourceItemId,
+            'matched_item_id' => $matchedItemId,
+            'source_status' => $isDirectPair ? (string) ($sourceItem['status'] ?? '') : (string) ($matchedItem['status'] ?? ''),
+            'matched_status' => $isDirectPair ? (string) ($matchedItem['status'] ?? '') : (string) ($sourceItem['status'] ?? ''),
+            'text_score' => (float) ($match['text_score'] ?? 0.0),
+            'image_score' => (float) ($match['image_score'] ?? 0.0),
+            'combined_score' => (float) ($match['combined_score'] ?? 0.0),
+            'match_reason' => (string) ($match['match_reason'] ?? ''),
+        ];
+
+        try {
+            if ($existingPair) {
+                $stmt = $this->db->prepare("
+                    UPDATE item_similarity_matches
+                    SET
+                        source_status = ?,
+                        matched_status = ?,
+                        text_score = ?,
+                        image_score = ?,
+                        combined_score = ?,
+                        match_reason = ?,
+                        updated_at = NOW()
+                    WHERE match_id = ?
+                ");
+                $stmt->execute([
+                    $payload['source_status'],
+                    $payload['matched_status'],
+                    $payload['text_score'],
+                    $payload['image_score'],
+                    $payload['combined_score'],
+                    $payload['match_reason'],
+                    (int) $existingPair['match_id'],
+                ]);
+
+                return ['saved' => true, 'is_new' => false];
+            }
+
+            $stmt = $this->db->prepare("
+                INSERT INTO item_similarity_matches (
+                    source_item_id,
+                    matched_item_id,
+                    source_status,
+                    matched_status,
+                    text_score,
+                    image_score,
+                    combined_score,
+                    match_reason,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            ");
+            $stmt->execute([
+                $payload['source_item_id'],
+                $payload['matched_item_id'],
+                $payload['source_status'],
+                $payload['matched_status'],
+                $payload['text_score'],
+                $payload['image_score'],
+                $payload['combined_score'],
+                $payload['match_reason'],
+            ]);
+
+            return ['saved' => true, 'is_new' => true];
+        } catch (PDOException $e) {
+            error_log('Item similarity upsert failed: ' . $e->getMessage());
+            return ['saved' => false, 'is_new' => false];
+        }
+    }
+
+    private function findExistingItemSimilarityPair($sourceItemId, $matchedItemId) {
+        $stmt = $this->db->prepare("
+            SELECT match_id, source_item_id, matched_item_id
+            FROM item_similarity_matches
+            WHERE (source_item_id = ? AND matched_item_id = ?)
+               OR (source_item_id = ? AND matched_item_id = ?)
+            LIMIT 1
+        ");
+        $stmt->execute([
+            (int) $sourceItemId,
+            (int) $matchedItemId,
+            (int) $matchedItemId,
+            (int) $sourceItemId,
+        ]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    private function sendAutomaticMatchNotification(array $sourceItem, array $matchedItem, array $match) {
+        $matchedUserId = (int) ($matchedItem['owner_user_id'] ?? $matchedItem['reported_by'] ?? $matchedItem['user_id'] ?? 0);
+        if ($matchedUserId <= 0) {
+            return false;
+        }
+
+        $similarityPercent = (float) ($match['combined_score_percent'] ?? 0.0);
+        $title = 'Possible Match Found';
+        $message = 'A similar item may match your report "' . (string) ($matchedItem['title'] ?? 'Untitled item') . '" with ' . $this->formatPercent($similarityPercent) . '% similarity.';
+
+        try {
+            $this->insertNotificationRecord($matchedUserId, $title, $message, 'match');
+        } catch (PDOException $e) {
+            error_log('Automatic match notification insert failed: ' . $e->getMessage());
+            return false;
+        }
+
+        try {
+            $this->sendAutomaticMatchEmail($matchedUserId, $sourceItem, $matchedItem, $similarityPercent);
+        } catch (Throwable $e) {
+            error_log('Automatic match email failed: ' . $e->getMessage());
+        }
+
+        return true;
+    }
+
+    private function sendAutomaticMatchEmail($userId, array $sourceItem, array $matchedItem, $similarityPercent) {
+        if (class_exists('EnvLoader')) {
+            EnvLoader::load();
+        }
+
+        $user = $this->getUserNotificationRecipient($userId);
+        if (!$user || !$user['email_notifications']) {
+            return false;
+        }
+
+        $toEmail = $this->resolveNotificationEmail($user);
+        if ($toEmail === '') {
+            return false;
+        }
+
+        $subject = 'Possible Match Found for Your Lost/Found Item';
+        $emailBody = $this->getAutomaticMatchEmailTemplate($user, $sourceItem, $matchedItem, $similarityPercent);
+        $result = MailConfig::sendNotification($toEmail, $subject, $emailBody);
+
+        if (!$result) {
+            error_log('Automatic match email delivery failed for user ' . (int) $userId . ' (' . $toEmail . ').');
+        }
+
+        $this->logEmail(
+            $toEmail,
+            (string) ($user['name'] ?? ''),
+            $subject,
+            'Reported item: ' . (string) ($sourceItem['title'] ?? 'Untitled item')
+                . ' | Matched item: ' . (string) ($matchedItem['title'] ?? 'Untitled item')
+                . ' | Similarity: ' . $this->formatPercent($similarityPercent) . '%',
+            'match',
+            $result ? 'sent' : 'failed'
+        );
+
+        return $result;
+    }
+
+    private function getAutomaticMatchEmailTemplate(array $user, array $sourceItem, array $matchedItem, $similarityPercent) {
+        $userName = htmlspecialchars((string) ($user['name'] ?? 'User'));
+        $sourceTitle = htmlspecialchars((string) ($sourceItem['title'] ?? 'Untitled item'));
+        $matchedTitle = htmlspecialchars((string) ($matchedItem['title'] ?? 'Untitled item'));
+        $similarityText = htmlspecialchars($this->formatPercent($similarityPercent));
+        $dashboardUrl = htmlspecialchars($this->getBaseUrl());
+
+        return '
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Possible Match Found</title>
+            <style>
+                body {
+                    font-family: "Segoe UI", Arial, sans-serif;
+                    background: #f5f7fb;
+                    margin: 0;
+                    padding: 24px 0;
+                }
+                .email-container {
+                    max-width: 640px;
+                    margin: 0 auto;
+                    background: #ffffff;
+                    border-radius: 18px;
+                    overflow: hidden;
+                    box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+                }
+                .email-header {
+                    background: linear-gradient(135deg, #FF6B35, #E85D2C);
+                    color: #ffffff;
+                    padding: 28px 32px;
+                }
+                .email-header h1 {
+                    margin: 0;
+                    font-size: 24px;
+                }
+                .email-body {
+                    padding: 32px;
+                    color: #334155;
+                    line-height: 1.6;
+                }
+                .summary-card {
+                    background: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 14px;
+                    padding: 18px 20px;
+                    margin: 24px 0;
+                }
+                .summary-card p {
+                    margin: 8px 0;
+                }
+                .button {
+                    display: inline-block;
+                    margin-top: 8px;
+                    background: #FF6B35;
+                    color: #ffffff;
+                    text-decoration: none;
+                    padding: 12px 22px;
+                    border-radius: 999px;
+                    font-weight: 600;
+                }
+                .footer {
+                    padding: 20px 32px 28px;
+                    color: #64748b;
+                    font-size: 12px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="email-container">
+                <div class="email-header">
+                    <h1>Possible Match Found</h1>
+                </div>
+                <div class="email-body">
+                    <p>Hello ' . $userName . ',</p>
+                    <p>A possible match has been found for your item report.</p>
+                    <div class="summary-card">
+                        <p><strong>Reported item:</strong> ' . $sourceTitle . '</p>
+                        <p><strong>Matched item:</strong> ' . $matchedTitle . '</p>
+                        <p><strong>Similarity score:</strong> ' . $similarityText . '%</p>
+                    </div>
+                    <p>Please log in to the RECLAIM System to review the matched item details.</p>
+                    <a href="' . $dashboardUrl . '" class="button">Open RECLAIM System</a>
+                </div>
+                <div class="footer">
+                    Thank you,<br>
+                    RECLAIM System
+                </div>
+            </div>
+        </body>
+        </html>
+        ';
     }
 
     /**
@@ -418,6 +766,11 @@ class NotificationSystem {
             // Silent fail - don't break the email sending if logging fails
         }
     }
+
+    private function formatPercent($score) {
+        $formatted = number_format((float) $score, 2, '.', '');
+        return rtrim(rtrim($formatted, '0'), '.');
+    }
     
     /**
      * Get email template
@@ -555,7 +908,7 @@ class NotificationSystem {
      */
     private function getBaseUrl() {
         $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://';
-        $host = $_SERVER['HTTP_HOST'];
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         return $protocol . $host . '/reclaim-system/';
     }
 }

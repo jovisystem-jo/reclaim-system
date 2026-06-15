@@ -149,8 +149,10 @@ try {
     }
     $notification->send($userId, $notificationTitle, $notificationMessage, 'success');
 
-    if ($status === 'lost') {
-        $notification->notifySimilarFoundItemsForLostReport($itemId, $userId);
+    try {
+        $notification->processAutomaticItemMatches($itemId);
+    } catch (Throwable $exception) {
+        error_log('Mobile automatic match processing failed for item ' . (int) $itemId . ': ' . $exception->getMessage());
     }
 
     $stmt = $mobileApiDb->prepare('SELECT * FROM items WHERE item_id = ? LIMIT 1');

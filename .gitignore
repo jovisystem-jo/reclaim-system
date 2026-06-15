@@ -13,3 +13,7 @@ assets/uploads/*
 # Runtime session files
 storage/sessions/*
 !storage/sessions/.gitignore
+
+# Local registration test artifacts
+register*_cookies*.txt
+register_test_page.html

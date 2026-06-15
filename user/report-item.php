@@ -32,8 +32,9 @@ if (!file_exists($uploadDir)) {
 // Delivery locations array
 $delivery_locations = [
     'I keep it myself',
-    'Security Office - Main Gate',
-    'Security Office - North Gate',
+    'Security Office - Pos 1 : Pos Stadium UTHM',
+    'Security Office - Pos 4 : Pos Masjid Sultan Ibrahim UTHM',
+    'Security Office - Pos Kolej Kediaman Perwira',
     'Auxiliary Police and Security Office',
     'Other (Please specify)'
 ];
@@ -180,7 +181,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
                 $itemID = $db->lastInsertId();
-                $similarFoundMatches = 0;
                 // Upload to Imagga if image exists
                 if (!empty($image_url)) {
                     try {
@@ -196,10 +196,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Send notification to user
                 $notifTitle = $status == 'lost' ? 'Lost Item Reported' : 'Found Item Reported';
                 $notifMessage = "You have successfully reported a {$status} item: '{$title}'.";
-                
-                if ($similarFoundMatches > 0) {
-                    $notifMessage .= "\n\nWe found {$similarFoundMatches} similar item" . ($similarFoundMatches === 1 ? '' : 's') . ' and sent you a notification.';
-                }
                 $notification->send($_SESSION['userID'], $notifTitle, $notifMessage, 'success');
                 
                 if ($status == 'lost') {
@@ -208,11 +204,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $success = 'Lost item reported successfully!';
                     if (!empty($image_url)) {
                         $success .= ' Image uploaded successfully.';
-                    }
-                    
-                    $similarFoundMatches = $notification->notifySimilarFoundItemsForLostReport((int) $itemID, (int) $_SESSION['userID']);
-                    if ($similarFoundMatches > 0) {
-                        $success .= ' We found ' . $similarFoundMatches . ' similar found item' . ($similarFoundMatches === 1 ? '' : 's') . ' and sent you a notification.';
                     }
                 } else {
                     $stmt = $db->prepare("INSERT INTO found_reports (itemID, reporterID, found_by) VALUES (?, ?, ?)");
@@ -223,8 +214,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $success .= '<br><strong>Keep at:</strong> ' . htmlspecialchars($delivery_location);
                 }
+
+                try {
+                    $notification->processAutomaticItemMatches((int) $itemID);
+                } catch (Throwable $e) {
+                    error_log('Automatic match processing failed for reported item ' . (int) $itemID . ': ' . $e->getMessage());
+                }
                 
-                // Add similar items to success message
                 $_POST = [];
             } else {
                 $error = 'Failed to report item. Please try again.';
