@@ -12,6 +12,11 @@ class MailConfig
 {
     private static $lastError = '';
 
+    private static function isProductionEnvironment()
+    {
+        return strtolower(trim((string) self::getEnvValue('APP_ENV', 'development'))) === 'production';
+    }
+
     private static function dependenciesAvailable()
     {
         if (!class_exists(PHPMailer::class)) {
@@ -63,6 +68,21 @@ class MailConfig
         }
 
         return (int) $value;
+    }
+
+    private static function resolveConfiguredMailer()
+    {
+        $configured = trim((string) self::getEnvValue('MAIL_MAILER', self::getEnvValue('MAIL_DRIVER', '')));
+        if ($configured !== '') {
+            return self::normalizeMailer($configured);
+        }
+
+        return self::isProductionEnvironment() ? 'mail' : 'smtp';
+    }
+
+    private static function shouldFallbackToMail()
+    {
+        return self::getEnvBoolean('MAIL_FALLBACK_TO_MAIL', self::isProductionEnvironment());
     }
 
     private static function normalizeSmtpPassword($password)
@@ -117,9 +137,20 @@ class MailConfig
             return $smtpUsername;
         }
 
-        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '')));
         $host = preg_replace('/:\d+$/', '', $host) ?? '';
         $host = preg_replace('/^www\./i', '', $host) ?? '';
+
+        if ($host === '') {
+            $appUrlHost = parse_url((string) self::getEnvValue('APP_URL', ''), PHP_URL_HOST);
+            if (is_string($appUrlHost) && $appUrlHost !== '') {
+                $host = preg_replace('/^www\./i', '', $appUrlHost) ?? $appUrlHost;
+            }
+        }
+
+        if ($host === '') {
+            $host = trim((string) self::getEnvValue('MAIL_DOMAIN', ''));
+        }
 
         if ($host !== '' && filter_var('noreply@' . $host, FILTER_VALIDATE_EMAIL)) {
             return 'noreply@' . $host;
@@ -141,7 +172,7 @@ class MailConfig
         };
     }
 
-    public static function init()
+    public static function init($transportOverride = null)
     {
         if (!self::dependenciesAvailable()) {
             return null;
@@ -150,11 +181,12 @@ class MailConfig
         self::$lastError = '';
         $mailer = new PHPMailer(true);
         $mailer->CharSet = 'UTF-8';
-        $mailer->Timeout = self::getEnvInt('SMTP_TIMEOUT', 30);
 
         self::configureDebugOutput($mailer);
 
-        $transport = self::normalizeMailer(self::getEnvValue('MAIL_MAILER', self::getEnvValue('MAIL_DRIVER', 'smtp')));
+        $transport = $transportOverride !== null
+            ? self::normalizeMailer($transportOverride)
+            : self::resolveConfiguredMailer();
         $smtpUsername = '';
 
         if ($transport === 'mail') {
@@ -162,7 +194,10 @@ class MailConfig
         } elseif ($transport === 'sendmail') {
             $mailer->isSendmail();
         } else {
+            $smtpTimeout = self::getEnvInt('SMTP_TIMEOUT', self::isProductionEnvironment() ? 8 : 30);
             $mailer->isSMTP();
+            $mailer->Timeout = $smtpTimeout;
+            $mailer->Timelimit = max(5, $smtpTimeout + 2);
             $mailer->Host = trim((string) self::getEnvValue('SMTP_HOST', 'smtp.gmail.com'));
             $mailer->SMTPAuth = self::getEnvBoolean('SMTP_AUTH', true);
             $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
@@ -211,17 +246,19 @@ class MailConfig
         return $mailer;
     }
 
-    public static function sendNotification($to, $subject, $body)
+    private static function sendWithTransport($transport, $to, $subject, $body, &$errorMessage = '')
     {
+        $mail = null;
+
         try {
-            $mail = self::init();
+            $mail = self::init($transport);
             if (!$mail) {
+                $errorMessage = self::$lastError;
                 return false;
             }
 
             if ($mail->Mailer === 'smtp' && $mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {
-                self::$lastError = 'SMTP credentials are not configured.';
-                error_log('Email skipped: SMTP_USERNAME or SMTP_PASSWORD is not configured.');
+                $errorMessage = 'SMTP credentials are not configured.';
                 return false;
             }
 
@@ -235,10 +272,42 @@ class MailConfig
 
             return $mail->send();
         } catch (\Throwable $exception) {
-            self::$lastError = trim((string) (($mail->ErrorInfo ?? '') !== '' ? $mail->ErrorInfo : $exception->getMessage()));
-            error_log('Email failed to ' . $to . ': ' . (self::$lastError !== '' ? self::$lastError : $exception->getMessage()));
+            $errorMessage = trim((string) (($mail && $mail->ErrorInfo !== '') ? $mail->ErrorInfo : $exception->getMessage()));
             return false;
         }
+    }
+
+    public static function sendNotification($to, $subject, $body)
+    {
+        $primaryTransport = self::resolveConfiguredMailer();
+        $primaryError = '';
+
+        if (self::sendWithTransport($primaryTransport, $to, $subject, $body, $primaryError)) {
+            self::$lastError = '';
+            return true;
+        }
+
+        if ($primaryTransport === 'smtp' && self::shouldFallbackToMail()) {
+            error_log('SMTP email delivery failed for ' . $to . ', retrying with PHP mail(): ' . $primaryError);
+
+            $fallbackError = '';
+            if (self::sendWithTransport('mail', $to, $subject, $body, $fallbackError)) {
+                self::$lastError = '';
+                return true;
+            }
+
+            if ($fallbackError !== '') {
+                $primaryError = $fallbackError;
+            }
+        }
+
+        self::$lastError = trim((string) $primaryError);
+        if (self::$lastError === '') {
+            self::$lastError = 'Unknown mail delivery error.';
+        }
+
+        error_log('Email failed to ' . $to . ': ' . self::$lastError);
+            return false;
     }
 
     public static function getLastError()
@@ -249,7 +318,7 @@ class MailConfig
     public static function testConnection()
     {
         try {
-            $mail = self::init();
+            $mail = self::init('smtp');
             if (!$mail) {
                 return false;
             }
