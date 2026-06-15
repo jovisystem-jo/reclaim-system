@@ -9,7 +9,7 @@ $db = Database::getInstance()->getConnection();
 $notification = new NotificationSystem();
 $message = '';
 $error = '';
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 
 $admin_signature = reclaimGetAdminSignature($db, (int) ($_SESSION['userID'] ?? 0), $base_url);
 

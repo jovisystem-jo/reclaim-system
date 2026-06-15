@@ -10,14 +10,14 @@
                 <div class="col-lg-4 col-md-6">
                     <h5>Quick Links</h5>
                     <ul class="list-unstyled">
-                        <li><a href="/reclaim-system/"><i class="fas fa-home me-2"></i>Home</a></li>
-                        <li><a href="/reclaim-system/search.php"><i class="fas fa-search me-2"></i>Search Items</a></li>
-                        <li><a href="/reclaim-system/contact-us.php"><i class="fas fa-envelope me-2"></i>Contact Us</a></li>
+                        <li><a href="<?= $base_url ?>"><i class="fas fa-home me-2"></i>Home</a></li>
+                        <li><a href="<?= $base_url ?>search.php"><i class="fas fa-search me-2"></i>Search Items</a></li>
+                        <li><a href="<?= $base_url ?>contact-us.php"><i class="fas fa-envelope me-2"></i>Contact Us</a></li>
                         <?php if(!isset($_SESSION['userID'])): ?>
-                            <li><a href="/reclaim-system/register.php">Register</a></li>
-                            <li><a href="/reclaim-system/login.php">Login</a></li>
+                            <li><a href="<?= $base_url ?>register.php">Register</a></li>
+                            <li><a href="<?= $base_url ?>login.php">Login</a></li>
                         <?php else: ?>
-                            <li><a href="/reclaim-system/logout.php">Logout</a></li>
+                            <li><a href="<?= $base_url ?>logout.php">Logout</a></li>
                         <?php endif; ?>
                     </ul>
                 </div>
@@ -39,7 +39,7 @@
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="/reclaim-system/assets/js/main.js"></script>
+<script src="<?= $base_url ?>assets/js/main.js"></script>
 <?php if (!$embedded_layout): ?>
 </body>
 </html>

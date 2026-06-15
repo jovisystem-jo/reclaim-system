@@ -31,7 +31,7 @@ $stmt = $db->prepare("SELECT * FROM items WHERE reported_by = ? ORDER BY reporte
 $stmt->execute([$userID]);
 $recent_items = $stmt->fetchAll();
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 ?>
 <!DOCTYPE html>
 <html lang="en">

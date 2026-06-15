@@ -9,13 +9,13 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // Check if user is logged in
 if (!isset($_SESSION['userID'])) {
-    header('Location: /reclaim-system/login.php');
+    header('Location: ' . app_url_path('login.php'));
     exit();
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    header('Location: /reclaim-system/user/user-profile.php');
+    header('Location: ' . app_url_path('user/user-profile.php'));
     exit();
 }
 
@@ -23,7 +23,7 @@ require_csrf_token();
 
 if (($_POST['confirm_delete'] ?? '') !== 'DELETE') {
     $_SESSION['delete_error'] = 'Account deletion was not confirmed.';
-    header('Location: /reclaim-system/user/user-profile.php');
+    header('Location: ' . app_url_path('user/user-profile.php'));
     exit();
 }
 
@@ -95,7 +95,7 @@ try {
     $_SESSION['account_deleted'] = 'Your account has been successfully deleted. We are sorry to see you go!';
     
     // Redirect to index page
-    header('Location: /reclaim-system/index.php');
+    header('Location: ' . app_url_path('index.php'));
     exit();
     
 } catch (Exception $e) {
@@ -109,7 +109,7 @@ try {
     
     // Set error message and redirect back to profile
     $_SESSION['delete_error'] = 'Failed to delete account. Please try again or contact support.';
-    header('Location: /reclaim-system/user/user-profile.php');
+    header('Location: ' . app_url_path('user/user-profile.php'));
     exit();
 }
 ?>

@@ -92,7 +92,7 @@ if (!empty($matchedItemIds)) {
     }
 }
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 $analysisImageUrl = !empty($image_url) ? getImageUrl($image_url, $base_url) : '';
 ?>
 

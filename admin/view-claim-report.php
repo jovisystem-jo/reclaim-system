@@ -16,7 +16,7 @@ if ($claimId == 0) {
 }
 
 $db = Database::getInstance()->getConnection();
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 reclaimEnsureClaimStatusSchema($db);
 
 // First, check if claim exists and get basic info

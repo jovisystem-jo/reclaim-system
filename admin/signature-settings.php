@@ -7,7 +7,7 @@ requireAdmin();
 $db = Database::getInstance()->getConnection();
 $message = '';
 $error = '';
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 
 // Create signature uploads directory if not exists
 $signatureDir = __DIR__ . '/../assets/uploads/signatures/';

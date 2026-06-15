@@ -5,7 +5,7 @@ function isLoggedIn() {
 
 function requireLogin() {
     if (!isLoggedIn()) {
-        header('Location: login.php');
+        header('Location: ' . app_url_path('login.php'));
         exit();
     }
 }
@@ -13,14 +13,14 @@ function requireLogin() {
 function requireAdmin() {
     requireLogin();
     if ($_SESSION['role'] !== 'admin') {
-        header('Location: index.php');
+        header('Location: ' . app_url_path('index.php'));
         exit();
     }
 }
 
 function checkAuth() {
     if (!isLoggedIn()) {
-        header('Location: ../login.php');
+        header('Location: ' . app_url_path('login.php'));
         exit();
     }
 }

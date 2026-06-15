@@ -1,5 +1,11 @@
+Options -Indexes
+DirectoryIndex index.php index.html
 RewriteEngine On
-RewriteBase /reclaim-system/
+
+# Support legacy /reclaim-system/... links when the app is deployed at the domain root.
+RewriteCond %{REQUEST_URI} ^/reclaim-system(?:/(.*))?$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/reclaim-system !-d
+RewriteRule ^reclaim-system/?(.*)$ $1 [L,QSA]
 
 # Security: never serve config files or secrets directly from the browser.
 RewriteRule ^config(/|$) - [F,L]

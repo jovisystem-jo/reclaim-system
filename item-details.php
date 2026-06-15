@@ -13,7 +13,7 @@ $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 // If no ID, redirect to search
 if ($id == 0) {
-    header('Location: /reclaim-system/search.php');
+    header('Location: ' . app_url_path('search.php'));
     exit();
 }
 
@@ -31,7 +31,7 @@ $item = $stmt->fetch(PDO::FETCH_ASSOC);
 
 // If item not found, redirect to search
 if (!$item) {
-    header('Location: /reclaim-system/search.php');
+    header('Location: ' . app_url_path('search.php'));
     exit();
 }
 
@@ -50,7 +50,7 @@ if(isset($_SESSION['userID'])) {
 
 // Helper function to get profile image URL
 function getReporterProfileImageUrl($imagePath, $base_url) {
-    if (!empty($imagePath) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/reclaim-system/' . $imagePath)) {
+    if (!empty($imagePath) && file_exists(app_filesystem_path($imagePath))) {
         return $base_url . $imagePath;
     }
     return '';
@@ -72,7 +72,7 @@ function formatTimeOnly($dateTime) {
     return date('h:i A', strtotime($dateTime));
 }
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
 ?>
 

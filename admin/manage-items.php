@@ -114,7 +114,7 @@ $stats['found'] = $db->query("SELECT COUNT(*) FROM items WHERE status = 'found'"
 $stats['returned'] = $db->query("SELECT COUNT(*) FROM items WHERE status = 'returned'")->fetchColumn();
 $stats['resolved'] = $db->query("SELECT COUNT(*) FROM items WHERE status = 'resolved'")->fetchColumn();
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 ?>
 <!DOCTYPE html>
 <html lang="en">

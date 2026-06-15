@@ -13,7 +13,7 @@ $notification = new NotificationSystem();
 $error = '';
 $success = '';
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 $now = new DateTimeImmutable('now');
 $currentDate = $now->format('Y-m-d');
 $currentTime = $now->format('H:i');

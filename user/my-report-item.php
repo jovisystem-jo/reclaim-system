@@ -140,7 +140,7 @@ $categories_list = [
     'Others' => '📦 Others'
 ];
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 
 // Display success/error messages
 $success_message = $_SESSION['success_message'] ?? '';

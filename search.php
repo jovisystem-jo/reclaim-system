@@ -351,7 +351,7 @@ if (isset($_SESSION['userID']) && !empty($search_query) && !$is_image_search) {
     $log_stmt->execute([$_SESSION['userID'], $search_query, $total_results]);
 }
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 
 // Get categories for filter dropdown
 $cat_stmt = $db->query("SELECT DISTINCT category FROM items WHERE status IN ('lost', 'found') AND category IS NOT NULL AND category != '' ORDER BY category");

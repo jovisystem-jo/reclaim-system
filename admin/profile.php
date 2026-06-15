@@ -8,7 +8,7 @@ $userID = $_SESSION['userID'];
 $success = '';
 $error = '';
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 
 // Get admin data
 $stmt = $db->prepare("SELECT * FROM users WHERE user_id = ?");

@@ -9,7 +9,7 @@ $userID = $_SESSION['userID'];
 $success = '';
 $error = '';
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     define('RECLAIM_EMBEDDED_LAYOUT', true);
 }

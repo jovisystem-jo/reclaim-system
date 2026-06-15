@@ -117,7 +117,7 @@ $user_registrations = $stmt->fetchAll();
 // Calculate success rate
 $success_rate = $total_claims > 0 ? round(($approved_claims / $total_claims) * 100, 1) : 0;
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 ?>
 <!DOCTYPE html>
 <html lang="en">

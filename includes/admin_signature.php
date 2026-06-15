@@ -64,9 +64,10 @@ function reclaimNormalizeSignatureImagePath(?string $path): string
     return $path;
 }
 
-function reclaimSignatureImageUrl(?string $path, string $baseUrl = '/reclaim-system/'): string
+function reclaimSignatureImageUrl(?string $path, ?string $baseUrl = null): string
 {
     $path = reclaimNormalizeSignatureImagePath($path);
+    $baseUrl = $baseUrl !== null ? $baseUrl : app_base_path();
 
     if ($path === '') {
         return '';
@@ -99,8 +100,9 @@ function reclaimDeleteSignatureImage(?string $path): void
     }
 }
 
-function reclaimGetAdminSignature(PDO $db, int $adminUserId, string $baseUrl = '/reclaim-system/'): array
+function reclaimGetAdminSignature(PDO $db, int $adminUserId, ?string $baseUrl = null): array
 {
+    $baseUrl = $baseUrl !== null ? $baseUrl : app_base_path();
     $defaults = reclaimDefaultAdminSignature();
 
     if ($adminUserId <= 0) {
@@ -145,8 +147,9 @@ function reclaimGetAdminSignature(PDO $db, int $adminUserId, string $baseUrl = '
     return $signature;
 }
 
-function reclaimSaveAdminSignature(PDO $db, int $adminUserId, array $signatureData, string $baseUrl = '/reclaim-system/'): array
+function reclaimSaveAdminSignature(PDO $db, int $adminUserId, array $signatureData, ?string $baseUrl = null): array
 {
+    $baseUrl = $baseUrl !== null ? $baseUrl : app_base_path();
     reclaimEnsureAdminSignatureTable($db);
 
     $storedImagePath = reclaimNormalizeSignatureImagePath($signatureData['image'] ?? '');

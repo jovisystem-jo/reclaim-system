@@ -45,7 +45,7 @@ $stmt = $db->prepare("
 $stmt->execute();
 $recent_claims = $stmt->fetchAll();
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 
 // Include header AFTER all PHP processing (no output before this point)
 require_once 'includes/header.php';

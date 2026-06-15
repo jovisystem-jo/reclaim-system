@@ -4,8 +4,8 @@ if (session_status() === PHP_SESSION_NONE) {
     secureSessionStart();
 }
 
-// Use direct absolute path - no dynamic calculation
-$base_url = '/reclaim-system/';
+// Resolve the application base path dynamically for local and production installs.
+$base_url = app_base_path();
 
 // Get unread notification count and latest UNREAD notifications
 $unread_count = 0;

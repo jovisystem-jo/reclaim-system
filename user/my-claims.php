@@ -113,7 +113,7 @@ $success_message = $_SESSION['success_message'] ?? '';
 $error_message = $_SESSION['error_message'] ?? '';
 unset($_SESSION['success_message'], $_SESSION['error_message']);
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 if (!defined('RECLAIM_EMBEDDED_LAYOUT')) {
     define('RECLAIM_EMBEDDED_LAYOUT', true);
 }

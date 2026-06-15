@@ -117,7 +117,7 @@ $month_stmt = $db->prepare($month_sql);
 $month_stmt->execute([$this_month]);
 $stats['this_month'] = $month_stmt->fetchColumn();
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 ?>
 <!DOCTYPE html>
 <html lang="en">

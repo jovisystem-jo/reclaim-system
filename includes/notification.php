@@ -907,9 +907,7 @@ class NotificationSystem {
      * Get base URL for links
      */
     private function getBaseUrl() {
-        $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://';
-        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-        return $protocol . $host . '/reclaim-system/';
+        return app_base_url();
     }
 }
 ?>

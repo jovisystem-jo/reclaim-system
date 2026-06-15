@@ -32,6 +32,83 @@ function loadEnvFile($path = null) {
 
 loadEnvFile();
 
+function normalizeAppBasePath($path) {
+    $path = trim(str_replace('\\', '/', (string) $path));
+
+    if ($path === '' || $path === '/') {
+        return '/';
+    }
+
+    return '/' . trim($path, '/') . '/';
+}
+
+function app_base_path() {
+    static $basePath = null;
+
+    if ($basePath !== null) {
+        return $basePath;
+    }
+
+    $configured = getenv('APP_BASE_PATH');
+    if ($configured !== false && trim((string) $configured) !== '') {
+        $basePath = normalizeAppBasePath($configured);
+        return $basePath;
+    }
+
+    $projectRoot = realpath(dirname(__DIR__)) ?: dirname(__DIR__);
+    $documentRoot = isset($_SERVER['DOCUMENT_ROOT']) ? (realpath($_SERVER['DOCUMENT_ROOT']) ?: $_SERVER['DOCUMENT_ROOT']) : '';
+
+    $projectRoot = str_replace('\\', '/', (string) $projectRoot);
+    $documentRoot = str_replace('\\', '/', (string) $documentRoot);
+
+    if ($documentRoot !== '' && strpos($projectRoot, $documentRoot) === 0) {
+        $relativePath = trim(substr($projectRoot, strlen($documentRoot)), '/');
+        $basePath = normalizeAppBasePath($relativePath);
+        return $basePath;
+    }
+
+    $scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+    $projectDirName = basename($projectRoot);
+
+    if ($scriptName !== '' && $projectDirName !== '' && preg_match('#/' . preg_quote($projectDirName, '#') . '(/|$)#', $scriptName)) {
+        $basePath = normalizeAppBasePath($projectDirName);
+        return $basePath;
+    }
+
+    $basePath = '/';
+    return $basePath;
+}
+
+function app_url_path($path = '') {
+    $path = ltrim((string) $path, '/');
+    $basePath = app_base_path();
+
+    if ($path === '') {
+        return $basePath;
+    }
+
+    return rtrim($basePath, '/') . '/' . $path;
+}
+
+function app_base_url() {
+    $isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    $protocol = $isHttps ? 'https://' : 'http://';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+
+    return $protocol . $host . app_base_path();
+}
+
+function app_filesystem_path($path = '') {
+    $rootPath = dirname(__DIR__);
+    $path = trim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, (string) $path), DIRECTORY_SEPARATOR);
+
+    if ($path === '') {
+        return $rootPath;
+    }
+
+    return $rootPath . DIRECTORY_SEPARATOR . $path;
+}
+
 function app_is_production() {
     $env = getenv('APP_ENV') ?: (defined('APP_ENV') ? APP_ENV : 'development');
     return strtolower((string) $env) === 'production';

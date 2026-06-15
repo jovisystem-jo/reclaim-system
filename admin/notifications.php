@@ -110,7 +110,7 @@ $stmt = $db->prepare("
 $stmt->execute([$_SESSION['userID']]);
 $stats = $stmt->fetch();
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 ?>
 <!DOCTYPE html>
 <html lang="en">

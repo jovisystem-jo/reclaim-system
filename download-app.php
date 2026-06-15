@@ -4,7 +4,7 @@ secureSessionStart();
 
 $apkRelativePath = 'assets/downloads/reclaim-user-app-v1.1.1.apk';
 $apkAbsolutePath = __DIR__ . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $apkRelativePath);
-$apkUrl = '/reclaim-system/' . $apkRelativePath;
+$apkUrl = app_url_path($apkRelativePath);
 $apkVersion = '1.1.1';
 $apkUpdatedAt = file_exists($apkAbsolutePath) ? date('F j, Y g:i A', filemtime($apkAbsolutePath)) : null;
 $apkSizeMb = file_exists($apkAbsolutePath) ? round(filesize($apkAbsolutePath) / 1048576, 2) : null;

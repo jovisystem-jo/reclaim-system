@@ -7,7 +7,7 @@ $db = Database::getInstance()->getConnection();
 $userID = $_SESSION['userID'];
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: ' . '/reclaim-system/');
+    header('Location: ' . app_url_path());
     exit();
 }
 
@@ -18,7 +18,7 @@ $item_id = $_POST['item_id'] ?? 0;
 $claimant_description = $_POST['claimant_description'] ?? '';
 
 if (!$item_id || empty($claimant_description)) {
-    header('Location: ' . '/reclaim-system/item-details.php?id=' . $item_id . '&error=missing_fields');
+    header('Location: ' . app_url_path('item-details.php') . '?id=' . $item_id . '&error=missing_fields');
     exit();
 }
 
@@ -26,7 +26,7 @@ if (!$item_id || empty($claimant_description)) {
 $stmt = $db->prepare("SELECT COUNT(*) FROM claim_requests WHERE item_id = ? AND claimant_id = ?");
 $stmt->execute([$item_id, $userID]);
 if ($stmt->fetchColumn() > 0) {
-    header('Location: ' . '/reclaim-system/item-details.php?id=' . $item_id . '&error=already_claimed');
+    header('Location: ' . app_url_path('item-details.php') . '?id=' . $item_id . '&error=already_claimed');
     exit();
 }
 
@@ -37,7 +37,7 @@ if (isset($_FILES['proof_image']) && $_FILES['proof_image']['error'] !== UPLOAD_
     // Security: proof images are validated by MIME type and saved with random names.
     $upload = secure_image_upload($_FILES['proof_image'], $uploadDir, 'assets/uploads/proofs');
     if (!$upload['success']) {
-        header('Location: ' . '/reclaim-system/item-details.php?id=' . $item_id . '&error=invalid_upload');
+        header('Location: ' . app_url_path('item-details.php') . '?id=' . $item_id . '&error=invalid_upload');
         exit();
     }
     $proof_image_url = $upload['path'];
@@ -50,6 +50,6 @@ $stmt = $db->prepare("
 ");
 $stmt->execute([$item_id, $userID, $claimant_description, $proof_image_url]);
 
-header('Location: ' . '/reclaim-system/item-details.php?id=' . $item_id . '&success=claim_submitted');
+header('Location: ' . app_url_path('item-details.php') . '?id=' . $item_id . '&success=claim_submitted');
 exit();
 ?>

@@ -47,7 +47,7 @@ $stmt = $db->prepare("
 $stmt->execute();
 $recent_users = $stmt->fetchAll();
 
-$base_url = '/reclaim-system/';
+$base_url = app_base_path();
 ?>
 <!DOCTYPE html>
 <html lang="en">
