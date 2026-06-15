@@ -3,11 +3,24 @@
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-require_once __DIR__ . '/../vendor/autoload.php';
+$vendorAutoload = __DIR__ . '/../vendor/autoload.php';
+if (is_file($vendorAutoload)) {
+    require_once $vendorAutoload;
+}
 
 class MailConfig {
     private static $mailer;
     private static $lastError = '';
+
+    private static function dependenciesAvailable() {
+        if (!class_exists(PHPMailer::class)) {
+            self::$lastError = 'Email dependencies are not installed on the server.';
+            error_log('Email skipped: vendor/autoload.php or PHPMailer is unavailable.');
+            return false;
+        }
+
+        return true;
+    }
 
     private static function getEnvValue($name, $default = '') {
         if (class_exists('EnvLoader')) {
@@ -34,6 +47,10 @@ class MailConfig {
     }
     
     public static function init() {
+        if (!self::dependenciesAvailable()) {
+            return null;
+        }
+
         self::$mailer = new PHPMailer(true);
         self::$lastError = '';
         
@@ -71,6 +88,9 @@ class MailConfig {
     public static function sendNotification($to, $subject, $body) {
         try {
             $mail = self::init();
+            if (!$mail) {
+                return false;
+            }
             if (empty($mail->Username) || empty($mail->Password)) {
                 self::$lastError = 'SMTP credentials are not configured.';
                 error_log("Email skipped: SMTP_USERNAME or SMTP_PASSWORD is not configured.");
@@ -84,7 +104,7 @@ class MailConfig {
             $mail->AltBody = strip_tags($body);
             
             return $mail->send();
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             self::$lastError = trim((string) ($mail->ErrorInfo ?? $e->getMessage()));
             error_log("Email failed to $to: " . (self::$lastError !== '' ? self::$lastError : $e->getMessage()));
             return false;
@@ -99,6 +119,9 @@ class MailConfig {
     public static function testConnection() {
         try {
             $mail = self::init();
+            if (!$mail) {
+                return false;
+            }
             if (empty($mail->Username) || empty($mail->Password)) {
                 self::$lastError = 'SMTP credentials are not configured.';
                 return false;
@@ -106,7 +129,7 @@ class MailConfig {
             $mail->smtpConnect();
             $mail->smtpClose();
             return true;
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             self::$lastError = trim((string) ($mail->ErrorInfo ?? $e->getMessage()));
             return false;
         }
