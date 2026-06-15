@@ -19,6 +19,8 @@ const MAX_FILE_SIZE = 5242880; // 5 MB
 const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png'];
 const IMAGGA_MIN_CONFIDENCE = 40.0;
 const IMAGGA_TAG_CACHE_TTL = 2592000; // 30 days
+const IMAGGA_CONNECT_TIMEOUT_SECONDS = 4;
+const IMAGGA_TOTAL_TIMEOUT_SECONDS = 8;
 const IMAGE_WEIGHT = 0.40;
 const IMAGGA_WEIGHT = 0.30;
 const JACCARD_WEIGHT = 0.20;
@@ -33,6 +35,8 @@ const MIN_VISUAL_SCORE = 60.0;
 const MIN_VISUAL_VERIFIED_MATCHES = 6;
 const MIN_SEMANTIC_IMAGGA_SCORE = 60.0;
 const MIN_SEMANTIC_JACCARD_SCORE = 12.0;
+const MAX_SEARCHABLE_ITEMS = 60;
+const MAX_PROCESSING_SECONDS = 20.0;
 
 final class JsonResponseException extends RuntimeException
 {
@@ -47,11 +51,52 @@ final class JsonResponseException extends RuntimeException
     }
 }
 
+$requestStartedAt = microtime(true);
+@set_time_limit(25);
+
 $uploadDir = __DIR__ . '/../assets/uploads/temp/';
 $uploadedRelativePath = null;
 $uploadedImagePath = null;
 $responsePayload = null;
 $responseStatus = 200;
+$responseSent = false;
+
+register_shutdown_function(static function () use (&$responseSent, &$uploadedRelativePath, $uploadDir): void {
+    if ($responseSent) {
+        return;
+    }
+
+    $error = error_get_last();
+    if (!is_array($error)) {
+        return;
+    }
+
+    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR];
+    if (!in_array($error['type'] ?? 0, $fatalTypes, true)) {
+        return;
+    }
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+    }
+
+    $message = 'Unable to process the uploaded image right now. Please try again later.';
+    if (stripos((string) ($error['message'] ?? ''), 'Maximum execution time') !== false) {
+        $message = 'Image search timed out on the server. Please try a smaller image or try again in a moment.';
+    }
+
+    echo json_encode(
+        ['success' => false, 'message' => $message],
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+    );
+
+    if (!empty($uploadedRelativePath)) {
+        deleteTemporaryUpload($uploadedRelativePath, $uploadDir);
+    }
+
+    $responseSent = true;
+});
 
 try {
     ensureDirectory($uploadDir);
@@ -111,6 +156,12 @@ try {
 
     $warnings = [];
     $uploadedTags = getImaggaTags($uploadedImagePath);
+    if (empty($uploadedTags)) {
+        $uploadedTags = deriveUploadedTagsFromFilename((string) ($_FILES['image']['name'] ?? ''));
+        if (!empty($uploadedTags)) {
+            $warnings[] = 'Live tag extraction was unavailable, so the uploaded filename was used as a lightweight fallback.';
+        }
+    }
     $uploadedObjectFamilies = detectObjectFamiliesFromTags($uploadedTags);
     $pythonCommand = findPythonCommand();
 
@@ -119,8 +170,14 @@ try {
     }
 
     $results = [];
+    $processingBudgetExceeded = false;
 
     foreach ($items as $item) {
+        if (hasExceededProcessingBudget($requestStartedAt)) {
+            $processingBudgetExceeded = true;
+            break;
+        }
+
         $itemText = buildItemSearchText($item);
         $itemKeywords = generateItemKeywords($item);
         $itemObjectFamilies = detectObjectFamiliesFromItem($item);
@@ -138,7 +195,12 @@ try {
         $imageMetrics = createEmptyImageMetrics();
         $itemImagePath = getFullImagePath((string) ($item['image_url'] ?? ''));
 
-        if ($pythonCommand !== null && $itemImagePath !== null && is_file($itemImagePath)) {
+        if (
+            $pythonCommand !== null
+            && $itemImagePath !== null
+            && is_file($itemImagePath)
+            && !hasExceededProcessingBudget($requestStartedAt, 3.0)
+        ) {
             $imageMetrics = calculateVisualSimilarity($uploadedImagePath, $itemImagePath, $pythonCommand);
         }
 
@@ -184,6 +246,10 @@ try {
             'visual_score' => $imageScore,
             'similarity_percentage' => $imageScore,
         ];
+    }
+
+    if ($processingBudgetExceeded) {
+        $warnings[] = 'Image search reached the shared-hosting time budget, so only the items checked so far were compared.';
     }
 
     usort($results, static function (array $left, array $right): int {
@@ -258,14 +324,16 @@ if ($responsePayload === null) {
 
 http_response_code($responseStatus);
 echo safeJsonEncode($responsePayload);
+$responseSent = true;
 
 function fetchSearchableItems(PDO $db): array
 {
     $statement = $db->prepare("
-        SELECT item_id, title, description, category, brand, color, image_tags, image_url, status
+        SELECT item_id, title, description, category, brand, color, image_tags, image_url, status, reported_date, date_found
         FROM items
         WHERE status IN ('lost', 'found')
-        ORDER BY item_id
+        ORDER BY COALESCE(date_found, reported_date) DESC, item_id DESC
+        LIMIT " . MAX_SEARCHABLE_ITEMS . "
     ");
     $statement->execute();
 
@@ -305,7 +373,7 @@ function getImaggaTags($imagePath): array
         return [];
     }
 
-    if (!function_exists('curl_init')) {
+    if (!function_exists('curl_init') || !function_exists('curl_file_create')) {
         error_log('cURL extension is required for Imagga tag extraction.');
         $requestCache[$imageHash] = [];
         return [];
@@ -321,9 +389,10 @@ function getImaggaTags($imagePath): array
         CURLOPT_POSTFIELDS => ['image' => $multipartFile],
         CURLOPT_USERPWD => $apiKey . ':' . $apiSecret,
         CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT => 60,
+        CURLOPT_CONNECTTIMEOUT => IMAGGA_CONNECT_TIMEOUT_SECONDS,
+        CURLOPT_TIMEOUT => IMAGGA_TOTAL_TIMEOUT_SECONDS,
         CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_NOSIGNAL => true,
     ]);
 
     $rawResponse = curl_exec($curlHandle);
@@ -1221,6 +1290,10 @@ function clampPercent(float $value): float
 
 function detectMimeType(string $filePath): string
 {
+    if (!function_exists('finfo_open') || !defined('FILEINFO_MIME_TYPE')) {
+        return 'image/jpeg';
+    }
+
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     if ($finfo === false) {
         return 'image/jpeg';
@@ -1301,6 +1374,32 @@ function safeJsonEncode($value): string
     }
 
     return $encoded;
+}
+
+function deriveUploadedTagsFromFilename(string $originalName): array
+{
+    $baseName = pathinfo($originalName, PATHINFO_FILENAME);
+    $baseName = strtolower(trim($baseName));
+    if ($baseName === '') {
+        return [];
+    }
+
+    $tokens = preg_split('/[^a-z0-9]+/i', $baseName) ?: [];
+    $tags = [];
+
+    foreach ($tokens as $token) {
+        $token = normalizePhrase($token);
+        if ($token !== '' && strlen(str_replace(' ', '', $token)) >= 3) {
+            $tags[$token] = true;
+        }
+    }
+
+    return array_keys($tags);
+}
+
+function hasExceededProcessingBudget(float $startedAt, float $reserveSeconds = 0.0): bool
+{
+    return (microtime(true) - $startedAt) >= max(0.0, MAX_PROCESSING_SECONDS - $reserveSeconds);
 }
 
 function respondJson(array $payload, int $statusCode = 200): void

@@ -1119,11 +1119,22 @@ function colorPhraseContains(string $normalizedText, string $normalizedAlias): b
                                     <?php endif; ?>
                                     
                                     <?php
-                                    $hasImage = !empty($item['image_url']) && imageFileExists($item['image_url']);
-                                    $imageUrl = $hasImage ? getImageUrl($item['image_url'], $base_url) : '';
+                                    $imageUrl = getImageUrl($item['image_url'] ?? '', $base_url);
+                                    $hasImage = !empty($imageUrl);
                                     ?>
                                     <?php if($hasImage): ?>
-                                        <img src="<?= $imageUrl ?>" class="card-img-top item-card-image" alt="Item image">
+                                        <div class="position-relative">
+                                            <img
+                                                src="<?= htmlspecialchars($imageUrl) ?>"
+                                                class="card-img-top item-card-image"
+                                                alt="Item image"
+                                                loading="lazy"
+                                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                            >
+                                            <div class="card-img-top bg-light item-card-placeholder" style="display: none;">
+                                                <i class="fas fa-box-open fa-4x" style="color: #FF8C00;"></i>
+                                            </div>
+                                        </div>
                                     <?php else: ?>
                                         <div class="card-img-top bg-light item-card-placeholder">
                                             <i class="fas fa-box-open fa-4x" style="color: #FF8C00;"></i>

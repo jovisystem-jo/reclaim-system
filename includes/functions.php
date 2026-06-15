@@ -10,27 +10,37 @@ function getImageUrl($imagePath, $baseUrl) {
     if (empty($imagePath)) {
         return null;
     }
-    
+
     // If it's already a full URL
     if (filter_var($imagePath, FILTER_VALIDATE_URL)) {
         return $imagePath;
     }
-    
-    // Remove any leading slashes
-    $imagePath = ltrim($imagePath, '/');
-    
-    // If it already has assets/uploads/
-    if (strpos($imagePath, 'assets/uploads/') === 0) {
-        return $baseUrl . $imagePath;
+
+    $normalizedPath = normalizeStoredImagePath($imagePath);
+    if ($normalizedPath === '') {
+        return null;
     }
-    
-    // If it starts with uploads/
-    if (strpos($imagePath, 'uploads/') === 0) {
-        return $baseUrl . 'assets/' . $imagePath;
+
+    if (strpos($normalizedPath, 'assets/') === 0) {
+        return app_url_path($normalizedPath);
     }
-    
+
+    if (strpos($normalizedPath, 'uploads/') === 0) {
+        return app_url_path('assets/' . $normalizedPath);
+    }
+
+    foreach (['profiles/', 'proofs/', 'signatures/', 'temp/'] as $subdirectory) {
+        if (strpos($normalizedPath, $subdirectory) === 0) {
+            return app_url_path('assets/uploads/' . $normalizedPath);
+        }
+    }
+
+    if (strpos($normalizedPath, '/') !== false) {
+        return app_url_path($normalizedPath);
+    }
+
     // Default: assume it's just a filename in assets/uploads/
-    return $baseUrl . 'assets/uploads/' . $imagePath;
+    return app_url_path('assets/uploads/' . $normalizedPath);
 }
 
 /**
@@ -40,23 +50,78 @@ function imageFileExists($imagePath) {
     if (empty($imagePath)) {
         return false;
     }
-    
-    // Remove any leading slashes
-    $imagePath = ltrim($imagePath, '/');
-    
-    // Try different possible paths
-    $pathsToCheck = [
-        __DIR__ . '/../' . $imagePath,
-        __DIR__ . '/../assets/uploads/' . basename($imagePath),
-    ];
-    
+
+    if (filter_var($imagePath, FILTER_VALIDATE_URL)) {
+        return true;
+    }
+
+    $normalizedPath = normalizeStoredImagePath($imagePath);
+    if ($normalizedPath === '') {
+        return false;
+    }
+
+    $pathsToCheck = [];
+
+    if (strpos($normalizedPath, 'assets/') === 0) {
+        $pathsToCheck[] = app_filesystem_path($normalizedPath);
+    }
+
+    if (strpos($normalizedPath, 'uploads/') === 0) {
+        $pathsToCheck[] = app_filesystem_path('assets/' . $normalizedPath);
+    }
+
+    foreach (['profiles/', 'proofs/', 'signatures/', 'temp/'] as $subdirectory) {
+        if (strpos($normalizedPath, $subdirectory) === 0) {
+            $pathsToCheck[] = app_filesystem_path('assets/uploads/' . $normalizedPath);
+        }
+    }
+
+    $pathsToCheck[] = app_filesystem_path($normalizedPath);
+    $pathsToCheck[] = app_filesystem_path('assets/uploads/' . basename($normalizedPath));
+
     foreach ($pathsToCheck as $path) {
         if (file_exists($path)) {
             return true;
         }
     }
-    
+
     return false;
+}
+
+function normalizeStoredImagePath($imagePath) {
+    if (!is_string($imagePath)) {
+        return '';
+    }
+
+    $path = trim(str_replace('\\', '/', $imagePath));
+    if ($path === '') {
+        return '';
+    }
+
+    $path = preg_replace('/[?#].*$/', '', $path) ?? '';
+    if ($path === '') {
+        return '';
+    }
+
+    $path = ltrim($path, '/');
+
+    $basePath = trim(app_base_path(), '/');
+    if ($basePath !== '' && strpos($path, $basePath . '/') === 0) {
+        $path = substr($path, strlen($basePath) + 1);
+    }
+
+    $projectDirectory = basename(dirname(__DIR__));
+    if ($projectDirectory !== '' && strpos($path, $projectDirectory . '/') === 0) {
+        $path = substr($path, strlen($projectDirectory) + 1);
+    }
+
+    foreach (['public_html/', 'public/'] as $prefix) {
+        if (strpos($path, $prefix) === 0) {
+            $path = substr($path, strlen($prefix));
+        }
+    }
+
+    return ltrim($path, '/');
 }
 
 /**
