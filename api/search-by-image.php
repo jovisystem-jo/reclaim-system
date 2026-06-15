@@ -22,6 +22,7 @@ const IMAGGA_TAG_CACHE_TTL = 2592000; // 30 days
 const IMAGGA_CONNECT_TIMEOUT_SECONDS = 4;
 const IMAGGA_TOTAL_TIMEOUT_SECONDS = 8;
 const PYTHON_DISCOVERY_TIMEOUT_SECONDS = 2.0;
+const PYTHON_DEPENDENCY_TIMEOUT_SECONDS = 2.0;
 const PYTHON_COMPARE_TIMEOUT_SECONDS = 4.0;
 const IMAGE_WEIGHT = 0.40;
 const IMAGGA_WEIGHT = 0.30;
@@ -869,6 +870,10 @@ function isRelevantMatch(array $result): bool
     $verifiedMatches = max(0, (int) ($result['verified_matches'] ?? 0));
     $matchedTags = $result['matched_tags'] ?? [];
     $sameObjectFamily = !empty($result['family_allowed']);
+    $strongSemantic = (
+        $imaggaScore >= MIN_SEMANTIC_IMAGGA_SCORE
+        || ($imaggaScore >= 45.0 && $jaccardScore >= MIN_SEMANTIC_JACCARD_SCORE && ($categoryScore >= 100.0 || !empty($matchedTags)))
+    );
 
     if ($imageScore < MIN_DISPLAY_IMAGE_SCORE && !($strongSemantic && $finalScore >= MIN_MATCH_SCORE)) {
         return false;
@@ -879,11 +884,6 @@ function isRelevantMatch(array $result): bool
         || ($imageScore >= MIN_VISUAL_SCORE && $verifiedMatches >= MIN_VISUAL_VERIFIED_MATCHES && $orbScore >= 25.0)
         || ($imageScore >= 55.0 && $verifiedMatches >= 5 && $orbScore >= 40.0)
         || ($imageScore >= 55.0 && $verifiedMatches >= 8 && $orbScore >= 25.0)
-    );
-
-    $strongSemantic = (
-        $imaggaScore >= MIN_SEMANTIC_IMAGGA_SCORE
-        || ($imaggaScore >= 45.0 && $jaccardScore >= MIN_SEMANTIC_JACCARD_SCORE && ($categoryScore >= 100.0 || !empty($matchedTags)))
     );
 
     $familySemanticMatch = (
@@ -1067,13 +1067,39 @@ function findPythonCommand(): ?array
         }
 
         $combinedOutput = trim(($result['stdout'] ?? '') . ' ' . ($result['stderr'] ?? ''));
-        if (($result['exit_code'] ?? 1) === 0 && stripos($combinedOutput, 'Python') !== false) {
-            $command = $candidate;
-            return $command;
+        if (($result['exit_code'] ?? 1) !== 0 || stripos($combinedOutput, 'Python') === false) {
+            continue;
         }
+
+        if (!pythonSupportsImageComparison($candidate)) {
+            continue;
+        }
+
+        $command = $candidate;
+        return $command;
     }
 
     return null;
+}
+
+function pythonSupportsImageComparison(array $pythonCommand): bool
+{
+    try {
+        $result = runCommand(
+            array_merge($pythonCommand, ['-c', 'import cv2, numpy; print("ok")']),
+            PYTHON_DEPENDENCY_TIMEOUT_SECONDS
+        );
+    } catch (Throwable $exception) {
+        return false;
+    }
+
+    if (($result['exit_code'] ?? 1) !== 0) {
+        return false;
+    }
+
+    $combinedOutput = trim(($result['stdout'] ?? '') . ' ' . ($result['stderr'] ?? ''));
+
+    return stripos($combinedOutput, 'ok') !== false;
 }
 
 function runCommand(array $commandParts, float $timeoutSeconds = 5.0): array

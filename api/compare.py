@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Production image comparator for RECLAIM.
 
@@ -14,8 +15,15 @@ import os
 import sys
 from typing import Dict, List, Tuple
 
-import cv2
-import numpy as np
+IMPORT_ERROR = None
+
+try:
+    import cv2
+    import numpy as np
+except Exception as exc:  # pragma: no cover - runtime safeguard
+    cv2 = None
+    np = None
+    IMPORT_ERROR = exc
 
 MAX_DIMENSION = 1200
 LOWE_RATIO = 0.75
@@ -301,6 +309,11 @@ def build_success_result(
 def main() -> None:
     if len(sys.argv) != 3:
         print(json.dumps(build_error_result("Usage: compare.py <image1> <image2>")))
+        return
+
+    if IMPORT_ERROR is not None:
+        log_debug(f"compare.py dependency error: {IMPORT_ERROR}")
+        print(json.dumps(build_error_result(f"Python image comparison dependencies unavailable: {IMPORT_ERROR}")))
         return
 
     image_path_1 = sys.argv[1]
