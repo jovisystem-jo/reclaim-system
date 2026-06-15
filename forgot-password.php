@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $updateStmt->execute([$tokenHash, $expiresAt, $user['user_id']]);
 
                     if (!password_reset_send_email($user['email'], $user['name'], $resetLink)) {
-                        error_log('Password reset email failed for: ' . $user['email']);
+                        error_log('Password reset email failed for ' . $user['email'] . ': ' . MailConfig::getLastError());
                     }
                 }
 

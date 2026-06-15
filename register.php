@@ -171,7 +171,12 @@ function send_register_otp_email($email, $name, $otpCode) {
         </div>
     ';
 
-    return MailConfig::sendNotification($email, $subject, $body);
+    $result = MailConfig::sendNotification($email, $subject, $body);
+    if (!$result) {
+        error_log('Registration OTP email failed for ' . $email . ': ' . MailConfig::getLastError());
+    }
+
+    return $result;
 }
 
 function stage_register_email_verification($email, $otpCode, array $draft = []) {

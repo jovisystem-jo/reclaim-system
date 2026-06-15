@@ -51,6 +51,9 @@ class NotificationSystem {
             $subject = "[Reclaim System] " . $title;
             
             $result = MailConfig::sendNotification($toEmail, $subject, $emailBody);
+            if (!$result) {
+                error_log('Notification email failed for ' . $toEmail . ': ' . MailConfig::getLastError());
+            }
             
             // Log email
             $this->logEmail($toEmail, $user['name'], $subject, $message, $type, $result ? 'sent' : 'failed');
@@ -467,7 +470,7 @@ class NotificationSystem {
         $result = MailConfig::sendNotification($toEmail, $subject, $emailBody);
 
         if (!$result) {
-            error_log('Automatic match email delivery failed for user ' . (int) $userId . ' (' . $toEmail . ').');
+            error_log('Automatic match email delivery failed for user ' . (int) $userId . ' (' . $toEmail . '): ' . MailConfig::getLastError());
         }
 
         $this->logEmail(

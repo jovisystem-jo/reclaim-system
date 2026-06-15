@@ -1,18 +1,19 @@
 <?php
-// Email configuration
+require_once __DIR__ . '/env.php';
+
 use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 $vendorAutoload = __DIR__ . '/../vendor/autoload.php';
 if (is_file($vendorAutoload)) {
     require_once $vendorAutoload;
 }
 
-class MailConfig {
-    private static $mailer;
+class MailConfig
+{
     private static $lastError = '';
 
-    private static function dependenciesAvailable() {
+    private static function dependenciesAvailable(): bool
+    {
         if (!class_exists(PHPMailer::class)) {
             self::$lastError = 'Email dependencies are not installed on the server.';
             error_log('Email skipped: vendor/autoload.php or PHPMailer is unavailable.');
@@ -22,115 +23,251 @@ class MailConfig {
         return true;
     }
 
-    private static function getEnvValue($name, $default = '') {
-        if (class_exists('EnvLoader')) {
-            EnvLoader::load(__DIR__ . '/../.env');
-            $value = EnvLoader::get($name, null);
-            if ($value !== null && $value !== false) {
-                return $value;
-            }
+    private static function getEnvValue(string $name, $default = '')
+    {
+        EnvLoader::load(__DIR__ . '/../.env');
+
+        $value = EnvLoader::get($name, null);
+        if ($value !== null && $value !== false) {
+            return $value;
         }
 
         $value = getenv($name);
         return $value === false ? $default : $value;
     }
 
-    private static function normalizeSmtpPassword($password) {
+    private static function getEnvBoolean(string $name, bool $default = false): bool
+    {
+        $value = self::getEnvValue($name, null);
+        if ($value === null || $value === '') {
+            return $default;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return $default;
+    }
+
+    private static function getEnvInt(string $name, int $default): int
+    {
+        $value = self::getEnvValue($name, '');
+        if ($value === '' || !is_numeric($value)) {
+            return $default;
+        }
+
+        return (int) $value;
+    }
+
+    private static function normalizeSmtpPassword($password): string
+    {
         $password = trim((string) $password);
 
-        // Gmail app passwords are often copied as 4 groups with spaces.
         if (preg_match('/^[a-zA-Z0-9]{4}( [a-zA-Z0-9]{4}){3}$/', $password)) {
             return str_replace(' ', '', $password);
         }
 
         return $password;
     }
-    
-    public static function init() {
+
+    private static function normalizeMailer($mailer): string
+    {
+        $normalized = strtolower(trim((string) $mailer));
+
+        if (in_array($normalized, ['mail', 'phpmail'], true)) {
+            return 'mail';
+        }
+
+        if ($normalized === 'sendmail') {
+            return 'sendmail';
+        }
+
+        return 'smtp';
+    }
+
+    private static function normalizeEncryption($encryption): string
+    {
+        $normalized = strtolower(trim((string) $encryption));
+
+        if (in_array($normalized, ['', 'none', 'null', 'false', 'off'], true)) {
+            return '';
+        }
+
+        if (in_array($normalized, ['ssl', 'smtps'], true)) {
+            return PHPMailer::ENCRYPTION_SMTPS;
+        }
+
+        return PHPMailer::ENCRYPTION_STARTTLS;
+    }
+
+    private static function buildDefaultFromEmail(string $smtpUsername = ''): string
+    {
+        $configured = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', self::getEnvValue('SMTP_FROM_EMAIL', '')));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        if ($smtpUsername !== '' && filter_var($smtpUsername, FILTER_VALIDATE_EMAIL)) {
+            return $smtpUsername;
+        }
+
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        $host = preg_replace('/:\d+$/', '', $host) ?? '';
+        $host = preg_replace('/^www\./i', '', $host) ?? '';
+
+        if ($host !== '' && filter_var('noreply@' . $host, FILTER_VALIDATE_EMAIL)) {
+            return 'noreply@' . $host;
+        }
+
+        return 'noreply@localhost';
+    }
+
+    private static function configureDebugOutput(PHPMailer $mailer): void
+    {
+        $debugLevel = self::getEnvInt('SMTP_DEBUG', 0);
+        if ($debugLevel <= 0) {
+            return;
+        }
+
+        $mailer->SMTPDebug = $debugLevel;
+        $mailer->Debugoutput = static function ($message, $level): void {
+            error_log('SMTP debug [' . $level . ']: ' . trim((string) $message));
+        };
+    }
+
+    public static function init(): ?PHPMailer
+    {
         if (!self::dependenciesAvailable()) {
             return null;
         }
 
-        self::$mailer = new PHPMailer(true);
         self::$lastError = '';
-        
-        // Enable debug for troubleshooting (remove after working)
-        // self::$mailer->SMTPDebug = 2;
-        
-        // Server settings
-        self::$mailer->isSMTP();
-        self::$mailer->Host = 'smtp.gmail.com';
-        self::$mailer->SMTPAuth = true;
-        
-        // Security: read SMTP credentials from environment variables, not source code.
-        self::$mailer->Username = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
-        self::$mailer->Password = self::normalizeSmtpPassword(self::getEnvValue('SMTP_PASSWORD', ''));
-        
-        self::$mailer->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        self::$mailer->Port = 587;
-        
-        // Set timeout to prevent hanging
-        self::$mailer->Timeout = 30;
-        
-        $fromEmail = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', ''));
-        if ($fromEmail === '') {
-            $fromEmail = self::$mailer->Username ?: 'noreply@reclaim.com';
+        $mailer = new PHPMailer(true);
+        $mailer->CharSet = 'UTF-8';
+        $mailer->Timeout = self::getEnvInt('SMTP_TIMEOUT', 30);
+
+        self::configureDebugOutput($mailer);
+
+        $transport = self::normalizeMailer(self::getEnvValue('MAIL_MAILER', self::getEnvValue('MAIL_DRIVER', 'smtp')));
+        $smtpUsername = '';
+
+        if ($transport === 'mail') {
+            $mailer->isMail();
+        } elseif ($transport === 'sendmail') {
+            $mailer->isSendmail();
+        } else {
+            $mailer->isSMTP();
+            $mailer->Host = trim((string) self::getEnvValue('SMTP_HOST', 'smtp.gmail.com'));
+            $mailer->SMTPAuth = self::getEnvBoolean('SMTP_AUTH', true);
+            $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
+            $mailer->Username = $smtpUsername;
+            $mailer->Password = self::normalizeSmtpPassword(self::getEnvValue('SMTP_PASSWORD', ''));
+
+            $mailer->SMTPSecure = self::normalizeEncryption(
+                self::getEnvValue('SMTP_ENCRYPTION', self::getEnvValue('SMTP_SECURE', 'tls'))
+            );
+            $mailer->Port = self::getEnvInt(
+                'SMTP_PORT',
+                $mailer->SMTPSecure === PHPMailer::ENCRYPTION_SMTPS ? 465 : 587
+            );
+            $mailer->SMTPAutoTLS = self::getEnvBoolean('SMTP_AUTO_TLS', $mailer->SMTPSecure !== '');
+
+            if (self::getEnvBoolean('SMTP_ALLOW_SELF_SIGNED', false)) {
+                $mailer->SMTPOptions = [
+                    'ssl' => [
+                        'verify_peer' => false,
+                        'verify_peer_name' => false,
+                        'allow_self_signed' => true,
+                    ],
+                ];
+            }
+
+            $heloDomain = trim((string) self::getEnvValue('SMTP_HELO_DOMAIN', ''));
+            if ($heloDomain !== '') {
+                $mailer->Helo = $heloDomain;
+            }
         }
 
-        $fromName = trim((string) self::getEnvValue('MAIL_FROM_NAME', 'Reclaim System'));
+        $fromEmail = self::buildDefaultFromEmail($smtpUsername);
+        $fromName = trim((string) self::getEnvValue('MAIL_FROM_NAME', self::getEnvValue('SMTP_FROM_NAME', 'Reclaim System')));
         if ($fromName === '') {
             $fromName = 'Reclaim System';
         }
-        self::$mailer->setFrom($fromEmail, $fromName);
-        return self::$mailer;
+
+        $mailer->setFrom($fromEmail, $fromName);
+
+        $replyToEmail = trim((string) self::getEnvValue('MAIL_REPLY_TO_EMAIL', ''));
+        if ($replyToEmail !== '' && filter_var($replyToEmail, FILTER_VALIDATE_EMAIL)) {
+            $replyToName = trim((string) self::getEnvValue('MAIL_REPLY_TO_NAME', $fromName));
+            $mailer->addReplyTo($replyToEmail, $replyToName !== '' ? $replyToName : $fromName);
+        }
+
+        return $mailer;
     }
-    
-    public static function sendNotification($to, $subject, $body) {
+
+    public static function sendNotification($to, $subject, $body): bool
+    {
         try {
             $mail = self::init();
             if (!$mail) {
                 return false;
             }
-            if (empty($mail->Username) || empty($mail->Password)) {
+
+            if ($mail->Mailer === 'smtp' && $mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {
                 self::$lastError = 'SMTP credentials are not configured.';
-                error_log("Email skipped: SMTP_USERNAME or SMTP_PASSWORD is not configured.");
+                error_log('Email skipped: SMTP_USERNAME or SMTP_PASSWORD is not configured.');
                 return false;
             }
-            $mail->clearAddresses();
-            $mail->addAddress($to);
+
+            $mail->clearAllRecipients();
+            $mail->clearAttachments();
             $mail->Subject = $subject;
             $mail->isHTML(true);
             $mail->Body = $body;
             $mail->AltBody = strip_tags($body);
-            
+            $mail->addAddress($to);
+
             return $mail->send();
-        } catch (\Throwable $e) {
-            self::$lastError = trim((string) ($mail->ErrorInfo ?? $e->getMessage()));
-            error_log("Email failed to $to: " . (self::$lastError !== '' ? self::$lastError : $e->getMessage()));
+        } catch (\Throwable $exception) {
+            self::$lastError = trim((string) (($mail->ErrorInfo ?? '') !== '' ? $mail->ErrorInfo : $exception->getMessage()));
+            error_log('Email failed to ' . $to . ': ' . (self::$lastError !== '' ? self::$lastError : $exception->getMessage()));
             return false;
         }
     }
 
-    public static function getLastError() {
+    public static function getLastError(): string
+    {
         return self::$lastError;
     }
-    
-    // Test function to verify configuration
-    public static function testConnection() {
+
+    public static function testConnection(): bool
+    {
         try {
             $mail = self::init();
             if (!$mail) {
                 return false;
             }
-            if (empty($mail->Username) || empty($mail->Password)) {
+
+            if ($mail->Mailer !== 'smtp') {
+                return true;
+            }
+
+            if ($mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {
                 self::$lastError = 'SMTP credentials are not configured.';
                 return false;
             }
+
             $mail->smtpConnect();
             $mail->smtpClose();
             return true;
-        } catch (\Throwable $e) {
-            self::$lastError = trim((string) ($mail->ErrorInfo ?? $e->getMessage()));
+        } catch (\Throwable $exception) {
+            self::$lastError = trim((string) (($mail->ErrorInfo ?? '') !== '' ? $mail->ErrorInfo : $exception->getMessage()));
             return false;
         }
     }
