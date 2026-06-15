@@ -169,7 +169,9 @@ try {
     $pythonCommand = findPythonCommand();
 
     if ($pythonCommand === null) {
-        $warnings[] = 'Python/OpenCV comparison is unavailable; image similarity scores were set to 0.';
+        $warnings[] = canRunManagedSubprocesses()
+            ? 'Python/OpenCV comparison is unavailable; image similarity scores were set to 0.'
+            : 'Python/OpenCV comparison is disabled on this hosting environment because PHP cannot manage subprocess timeouts safely.';
     }
 
     $results = [];
@@ -1044,6 +1046,11 @@ function findPythonCommand(): ?array
     }
 
     $resolved = true;
+
+    if (!canRunManagedSubprocesses()) {
+        return null;
+    }
+
     $configuredPython = trim((string) EnvLoader::get('PYTHON_PATH', ''));
 
     $candidates = array_filter([
@@ -1102,13 +1109,22 @@ function pythonSupportsImageComparison(array $pythonCommand): bool
     return stripos($combinedOutput, 'ok') !== false;
 }
 
+function canRunManagedSubprocesses(): bool
+{
+    return function_exists('proc_open')
+        && function_exists('proc_get_status')
+        && function_exists('proc_close')
+        && function_exists('proc_terminate')
+        && function_exists('stream_select');
+}
+
 function runCommand(array $commandParts, float $timeoutSeconds = 5.0): array
 {
     $command = implode(' ', array_map(static function ($part): string {
         return escapeshellarg((string) $part);
     }, $commandParts));
 
-    if (function_exists('proc_open')) {
+    if (canRunManagedSubprocesses()) {
         $descriptors = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
@@ -1197,13 +1213,7 @@ function runCommand(array $commandParts, float $timeoutSeconds = 5.0): array
         ];
     }
 
-    $stdout = shell_exec($command . ' 2>&1');
-    return [
-        'command' => $command,
-        'stdout' => (string) $stdout,
-        'stderr' => '',
-        'exit_code' => $stdout === null ? 1 : 0,
-    ];
+    throw new RuntimeException('Managed subprocess execution is unavailable on this host.');
 }
 
 function saveImageAnalysisRecord(PDO $db, string $imagePath, array $uploadedTags, array $results): string
