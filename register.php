@@ -41,6 +41,37 @@ const REGISTER_OTP_SESSION_KEY = 'pending_registration_otp';
 const REGISTER_OTP_EXPIRY_SECONDS = 300;
 const REGISTER_EMAIL_VERIFICATION_SESSION_KEY = 'register_email_verification';
 const REGISTER_EMAIL_VERIFICATION_EXPIRY_SECONDS = 300;
+$isAjaxEmailVerificationRequest = $_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($_POST['form_action'] ?? '') === 'send_email_verification_only'
+    && strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+
+function register_json_response(array $payload, int $statusCode = 200) {
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit();
+}
+
+if ($isAjaxEmailVerificationRequest) {
+    register_shutdown_function(static function (): void {
+        $error = error_get_last();
+        if (!is_array($error)) {
+            return;
+        }
+
+        $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR];
+        if (!in_array($error['type'] ?? 0, $fatalTypes, true)) {
+            return;
+        }
+
+        if (!headers_sent()) {
+            register_json_response([
+                'success' => false,
+                'message' => 'Unable to process the verification request right now. Please try again later.',
+            ], 500);
+        }
+    });
+}
 
 function register_form_defaults() {
     return [
@@ -348,12 +379,21 @@ $emailIsVerified = register_email_is_verified($formData['email']);
 $verificationModalIsRegistrationFlow = $pendingRegistration !== null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    require_csrf_token();
-
     $formAction = $_POST['form_action'] ?? 'start_registration';
+    $isAjaxEmailVerification = $isAjaxEmailVerificationRequest;
+
+    if ($isAjaxEmailVerification) {
+        if (!verify_csrf_token(request_csrf_token())) {
+            register_json_response([
+                'success' => false,
+                'message' => 'Invalid security token. Please refresh the page and try again.',
+            ], 403);
+        }
+    } else {
+        require_csrf_token();
+    }
+
     $db = Database::getInstance()->getConnection();
-    $isAjaxEmailVerification = $formAction === 'send_email_verification_only'
-        && strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
 
     if ($formAction === 'verify_otp') {
         $pendingRegistration = register_pending_data();
@@ -1369,7 +1409,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         body: payload.toString()
                     });
 
-                    const result = await response.json();
+                    const responseText = await response.text();
+                    let result;
+
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (error) {
+                        throw new Error(responseText || 'Unexpected server response.');
+                    }
+
                     if (!response.ok || !result.success) {
                         throw new Error(result.message || 'Unable to send verification code right now. Please try again later.');
                     }
