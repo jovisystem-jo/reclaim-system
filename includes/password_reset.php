@@ -1,5 +1,4 @@
 <?php
-require_once __DIR__ . '/../config/mail.php';
 
 const PASSWORD_RESET_TOKEN_EXPIRY_SECONDS = 3600;
 
@@ -71,6 +70,8 @@ function password_reset_build_url($path, array $params = []) {
 }
 
 function password_reset_send_email($email, $name, $resetLink) {
+    require_once __DIR__ . '/../config/mail.php';
+
     $safeName = htmlspecialchars($name !== '' ? $name : 'User', ENT_QUOTES, 'UTF-8');
     $safeLink = htmlspecialchars($resetLink, ENT_QUOTES, 'UTF-8');
     $expiryMinutes = (int) (PASSWORD_RESET_TOKEN_EXPIRY_SECONDS / 60);

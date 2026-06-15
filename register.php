@@ -1,6 +1,5 @@
 <?php
 require_once 'config/database.php';
-require_once 'config/mail.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     secureSessionStart();
@@ -153,6 +152,8 @@ function mask_register_email($email) {
 }
 
 function send_register_otp_email($email, $name, $otpCode) {
+    require_once 'config/mail.php';
+
     $subject = 'Your Reclaim System verification code';
     $safeName = htmlspecialchars($name !== '' ? $name : 'User', ENT_QUOTES, 'UTF-8');
     $safeCode = htmlspecialchars($otpCode, ENT_QUOTES, 'UTF-8');

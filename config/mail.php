@@ -12,7 +12,7 @@ class MailConfig
 {
     private static $lastError = '';
 
-    private static function dependenciesAvailable(): bool
+    private static function dependenciesAvailable()
     {
         if (!class_exists(PHPMailer::class)) {
             self::$lastError = 'Email dependencies are not installed on the server.';
@@ -23,7 +23,7 @@ class MailConfig
         return true;
     }
 
-    private static function getEnvValue(string $name, $default = '')
+    private static function getEnvValue($name, $default = '')
     {
         EnvLoader::load(__DIR__ . '/../.env');
 
@@ -36,7 +36,7 @@ class MailConfig
         return $value === false ? $default : $value;
     }
 
-    private static function getEnvBoolean(string $name, bool $default = false): bool
+    private static function getEnvBoolean($name, $default = false)
     {
         $value = self::getEnvValue($name, null);
         if ($value === null || $value === '') {
@@ -55,7 +55,7 @@ class MailConfig
         return $default;
     }
 
-    private static function getEnvInt(string $name, int $default): int
+    private static function getEnvInt($name, $default)
     {
         $value = self::getEnvValue($name, '');
         if ($value === '' || !is_numeric($value)) {
@@ -65,7 +65,7 @@ class MailConfig
         return (int) $value;
     }
 
-    private static function normalizeSmtpPassword($password): string
+    private static function normalizeSmtpPassword($password)
     {
         $password = trim((string) $password);
 
@@ -76,7 +76,7 @@ class MailConfig
         return $password;
     }
 
-    private static function normalizeMailer($mailer): string
+    private static function normalizeMailer($mailer)
     {
         $normalized = strtolower(trim((string) $mailer));
 
@@ -91,7 +91,7 @@ class MailConfig
         return 'smtp';
     }
 
-    private static function normalizeEncryption($encryption): string
+    private static function normalizeEncryption($encryption)
     {
         $normalized = strtolower(trim((string) $encryption));
 
@@ -106,7 +106,7 @@ class MailConfig
         return PHPMailer::ENCRYPTION_STARTTLS;
     }
 
-    private static function buildDefaultFromEmail(string $smtpUsername = ''): string
+    private static function buildDefaultFromEmail($smtpUsername = '')
     {
         $configured = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', self::getEnvValue('SMTP_FROM_EMAIL', '')));
         if ($configured !== '') {
@@ -128,7 +128,7 @@ class MailConfig
         return 'noreply@localhost';
     }
 
-    private static function configureDebugOutput(PHPMailer $mailer): void
+    private static function configureDebugOutput($mailer)
     {
         $debugLevel = self::getEnvInt('SMTP_DEBUG', 0);
         if ($debugLevel <= 0) {
@@ -136,12 +136,12 @@ class MailConfig
         }
 
         $mailer->SMTPDebug = $debugLevel;
-        $mailer->Debugoutput = static function ($message, $level): void {
+        $mailer->Debugoutput = static function ($message, $level) {
             error_log('SMTP debug [' . $level . ']: ' . trim((string) $message));
         };
     }
 
-    public static function init(): ?PHPMailer
+    public static function init()
     {
         if (!self::dependenciesAvailable()) {
             return null;
@@ -211,7 +211,7 @@ class MailConfig
         return $mailer;
     }
 
-    public static function sendNotification($to, $subject, $body): bool
+    public static function sendNotification($to, $subject, $body)
     {
         try {
             $mail = self::init();
@@ -241,12 +241,12 @@ class MailConfig
         }
     }
 
-    public static function getLastError(): string
+    public static function getLastError()
     {
         return self::$lastError;
     }
 
-    public static function testConnection(): bool
+    public static function testConnection()
     {
         try {
             $mail = self::init();
