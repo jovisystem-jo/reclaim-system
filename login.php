@@ -32,6 +32,8 @@ if ($redirect !== '') {
 
 if ($resetStatus === 'success') {
     $success = 'Password reset successful. You can now login with your new password.';
+} elseif (!empty($_SESSION['registration_success_notice']['message'])) {
+    $success = 'Registration successful. Log in to open your account and view your welcome notification.';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

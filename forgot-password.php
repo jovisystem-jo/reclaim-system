@@ -17,6 +17,8 @@ if (isset($_SESSION['userID'])) {
 
 $error = '';
 $success = '';
+$successType = 'success';
+$mailPreviewUrl = '';
 $email = '';
 $redirect = trim($_GET['redirect'] ?? ($_POST['redirect'] ?? ''));
 
@@ -64,19 +66,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $resetLink = password_reset_build_url('reset-password.php', $resetLinkParams);
 
-                    $updateStmt = $db->prepare('UPDATE users SET verification_token = ?, token_expiry = ? WHERE user_id = ?');
-                    $updateStmt->execute([$tokenHash, $expiresAt, $user['user_id']]);
+                    $transactionStarted = false;
 
-                    if (!password_reset_send_email($user['email'], $user['name'], $resetLink)) {
-                        error_log('Password reset email failed for ' . $user['email'] . ': ' . MailConfig::getLastError());
+                    try {
+                        if (!$db->inTransaction()) {
+                            $db->beginTransaction();
+                            $transactionStarted = true;
+                        }
+
+                        $updateStmt = $db->prepare('UPDATE users SET verification_token = ?, token_expiry = ? WHERE user_id = ?');
+                        $updateStmt->execute([$tokenHash, $expiresAt, $user['user_id']]);
+
+                        if (password_reset_send_email($user['email'], $user['name'], $resetLink)) {
+                            if ($transactionStarted && $db->inTransaction()) {
+                                $db->commit();
+                            }
+
+                            $success = 'If an active account with that email exists, a password reset link has been sent.';
+                            $successType = 'success';
+
+                            if (class_exists('MailConfig') && MailConfig::getLastTransport() === 'preview') {
+                                $success = 'The reset email was captured in the local development mailbox.';
+                                $successType = 'info';
+
+                                $previewId = trim((string) MailConfig::getLastPreviewId());
+                                if ($previewId !== '') {
+                                    $mailPreviewUrl = 'dev-mailbox.php?id=' . rawurlencode($previewId);
+                                }
+                            }
+
+                            $email = '';
+                        } else {
+                            error_log('Password reset email failed for ' . $user['email'] . ': ' . MailConfig::getLastError());
+
+                            if ($transactionStarted && $db->inTransaction()) {
+                                $db->rollBack();
+                            }
+
+                            $error = 'Unable to send the reset email right now. Please try again later.';
+                        }
+                    } catch (Throwable $mailException) {
+                        if ($transactionStarted && $db->inTransaction()) {
+                            $db->rollBack();
+                        }
+
+                        throw $mailException;
                     }
+                } else {
+                    $success = 'If an active account with that email exists, a password reset link has been sent.';
+                    $successType = 'success';
+                    $email = '';
                 }
-
-                $success = 'If an active account with that email exists, a password reset link has been sent.';
-                $email = '';
             }
         } catch (PDOException $e) {
             error_log('Forgot password database error: ' . $e->getMessage());
+            $error = 'Unable to process your request right now. Please try again later.';
+        } catch (Throwable $e) {
+            error_log('Forgot password error: ' . $e->getMessage());
             $error = 'Unable to process your request right now. Please try again later.';
         }
     }
@@ -116,7 +162,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
                             <?php endif; ?>
                             <?php if ($success): ?>
-                                <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
+                                <div class="alert alert-<?= htmlspecialchars($successType) ?>"><?= htmlspecialchars($success) ?></div>
+                            <?php endif; ?>
+                            <?php if ($mailPreviewUrl): ?>
+                                <div class="alert alert-info">
+                                    <strong>Open preview email:</strong><br>
+                                    <a href="<?= htmlspecialchars($mailPreviewUrl) ?>">View the password reset email</a>
+                                </div>
                             <?php endif; ?>
 
                             <form method="POST" action="">

@@ -21,20 +21,26 @@ if ($recipient === '' || !filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
 }
 
 fwrite(STDOUT, "Preparing mail configuration...\n");
-$mailer = MailConfig::init();
-if (!$mailer) {
-    $error = MailConfig::getLastError();
-    fwrite(STDERR, "Mailer initialization failed: " . ($error !== '' ? $error : 'Unknown error') . "\n");
-    exit(1);
-}
+$configuredMailer = MailConfig::getConfiguredMailer();
+fwrite(STDOUT, "Mailer: {$configuredMailer}\n");
 
-fwrite(STDOUT, "Mailer: {$mailer->Mailer}\n");
-fwrite(STDOUT, "From: {$mailer->From}\n");
-if ($mailer->Mailer === 'smtp') {
-    fwrite(STDOUT, "SMTP host: {$mailer->Host}\n");
-    fwrite(STDOUT, "SMTP port: {$mailer->Port}\n");
-    fwrite(STDOUT, "SMTP auth: " . ($mailer->SMTPAuth ? 'on' : 'off') . "\n");
-    fwrite(STDOUT, "SMTP user: {$mailer->Username}\n");
+if ($configuredMailer !== 'preview') {
+    $mailer = MailConfig::init($configuredMailer);
+    if (!$mailer) {
+        $error = MailConfig::getLastError();
+        fwrite(STDERR, "Mailer initialization failed: " . ($error !== '' ? $error : 'Unknown error') . "\n");
+        exit(1);
+    }
+
+    fwrite(STDOUT, "From: {$mailer->From}\n");
+    if ($mailer->Mailer === 'smtp') {
+        fwrite(STDOUT, "SMTP host: {$mailer->Host}\n");
+        fwrite(STDOUT, "SMTP port: {$mailer->Port}\n");
+        fwrite(STDOUT, "SMTP auth: " . ($mailer->SMTPAuth ? 'on' : 'off') . "\n");
+        fwrite(STDOUT, "SMTP user: {$mailer->Username}\n");
+    }
+} else {
+    fwrite(STDOUT, "Preview mailbox: dev-mailbox.php\n");
 }
 fwrite(STDOUT, "Sending test message to {$recipient}...\n");
 
@@ -48,7 +54,11 @@ $body = '
 ';
 
 if (MailConfig::sendNotification($recipient, $subject, $body)) {
-    fwrite(STDOUT, "Mail sent successfully to {$recipient}\n");
+    if (MailConfig::getLastTransport() === 'preview') {
+        fwrite(STDOUT, "Mail captured locally as preview " . MailConfig::getLastPreviewId() . "\n");
+    } else {
+        fwrite(STDOUT, "Mail sent successfully to {$recipient}\n");
+    }
     exit(0);
 }
 

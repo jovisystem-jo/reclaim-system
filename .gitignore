@@ -13,6 +13,8 @@ assets/uploads/*
 # Runtime session files
 storage/sessions/*
 !storage/sessions/.gitignore
+storage/mail-previews/*
+!storage/mail-previews/.gitignore
 
 # Local registration test artifacts
 register*_cookies*.txt

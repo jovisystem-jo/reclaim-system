@@ -11,6 +11,8 @@ if (is_file($vendorAutoload)) {
 class MailConfig
 {
     private static $lastError = '';
+    private static $lastTransport = '';
+    private static $lastPreviewId = '';
 
     private static function isProductionEnvironment()
     {
@@ -85,6 +87,11 @@ class MailConfig
         return self::getEnvBoolean('MAIL_FALLBACK_TO_MAIL', self::isProductionEnvironment());
     }
 
+    private static function shouldFallbackToPreview()
+    {
+        return self::getEnvBoolean('MAIL_FALLBACK_TO_PREVIEW', !self::isProductionEnvironment());
+    }
+
     private static function normalizeSmtpPassword($password)
     {
         $password = trim((string) $password);
@@ -100,6 +107,10 @@ class MailConfig
     {
         $normalized = strtolower(trim((string) $mailer));
 
+        if (in_array($normalized, ['preview', 'file', 'log'], true)) {
+            return 'preview';
+        }
+
         if (in_array($normalized, ['mail', 'phpmail'], true)) {
             return 'mail';
         }
@@ -109,6 +120,64 @@ class MailConfig
         }
 
         return 'smtp';
+    }
+
+    private static function resetLastState()
+    {
+        self::$lastError = '';
+        self::$lastTransport = '';
+        self::$lastPreviewId = '';
+    }
+
+    private static function previewDirectory()
+    {
+        return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'mail-previews';
+    }
+
+    private static function writePreview($to, $subject, $body, &$errorMessage = '')
+    {
+        $previewDir = self::previewDirectory();
+
+        if (!is_dir($previewDir) && !mkdir($previewDir, 0755, true) && !is_dir($previewDir)) {
+            $errorMessage = 'Unable to create the local mail preview folder.';
+            return false;
+        }
+
+        try {
+            $previewId = gmdate('Ymd_His') . '_' . bin2hex(random_bytes(6));
+        } catch (\Throwable $exception) {
+            $errorMessage = 'Unable to generate the local mail preview identifier.';
+            return false;
+        }
+
+        $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
+        $payload = [
+            'id' => $previewId,
+            'transport' => 'preview',
+            'created_at' => date('c'),
+            'to' => $to,
+            'subject' => $subject,
+            'from_email' => self::buildDefaultFromEmail($smtpUsername),
+            'from_name' => trim((string) self::getEnvValue('MAIL_FROM_NAME', self::getEnvValue('SMTP_FROM_NAME', 'Reclaim System'))),
+            'html_body' => $body,
+            'text_body' => strip_tags($body),
+        ];
+
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            $errorMessage = 'Unable to encode the local mail preview.';
+            return false;
+        }
+
+        $previewPath = $previewDir . DIRECTORY_SEPARATOR . $previewId . '.json';
+        if (file_put_contents($previewPath, $json) === false) {
+            $errorMessage = 'Unable to save the local mail preview.';
+            return false;
+        }
+
+        self::$lastTransport = 'preview';
+        self::$lastPreviewId = $previewId;
+        return true;
     }
 
     private static function normalizeEncryption($encryption)
@@ -197,7 +266,7 @@ class MailConfig
             $smtpTimeout = self::getEnvInt('SMTP_TIMEOUT', self::isProductionEnvironment() ? 8 : 30);
             $mailer->isSMTP();
             $mailer->Timeout = $smtpTimeout;
-            $mailer->Timelimit = max(5, $smtpTimeout + 2);
+            $mailer->getSMTPInstance()->Timelimit = max(5, $smtpTimeout + 2);
             $mailer->Host = trim((string) self::getEnvValue('SMTP_HOST', 'smtp.gmail.com'));
             $mailer->SMTPAuth = self::getEnvBoolean('SMTP_AUTH', true);
             $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
@@ -248,6 +317,10 @@ class MailConfig
 
     private static function sendWithTransport($transport, $to, $subject, $body, &$errorMessage = '')
     {
+        if ($transport === 'preview') {
+            return self::writePreview($to, $subject, $body, $errorMessage);
+        }
+
         $mail = null;
 
         try {
@@ -270,7 +343,12 @@ class MailConfig
             $mail->AltBody = strip_tags($body);
             $mail->addAddress($to);
 
-            return $mail->send();
+            $sent = $mail->send();
+            if ($sent) {
+                self::$lastTransport = $transport;
+            }
+
+            return $sent;
         } catch (\Throwable $exception) {
             $errorMessage = trim((string) (($mail && $mail->ErrorInfo !== '') ? $mail->ErrorInfo : $exception->getMessage()));
             return false;
@@ -279,6 +357,7 @@ class MailConfig
 
     public static function sendNotification($to, $subject, $body)
     {
+        self::resetLastState();
         $primaryTransport = self::resolveConfiguredMailer();
         $primaryError = '';
 
@@ -301,13 +380,25 @@ class MailConfig
             }
         }
 
+        if ($primaryTransport !== 'preview' && self::shouldFallbackToPreview()) {
+            $previewError = '';
+            if (self::sendWithTransport('preview', $to, $subject, $body, $previewError)) {
+                self::$lastError = '';
+                return true;
+            }
+
+            if ($previewError !== '') {
+                $primaryError = $previewError;
+            }
+        }
+
         self::$lastError = trim((string) $primaryError);
         if (self::$lastError === '') {
             self::$lastError = 'Unknown mail delivery error.';
         }
 
         error_log('Email failed to ' . $to . ': ' . self::$lastError);
-            return false;
+        return false;
     }
 
     public static function getLastError()
@@ -315,9 +406,30 @@ class MailConfig
         return self::$lastError;
     }
 
+    public static function getLastTransport()
+    {
+        return self::$lastTransport;
+    }
+
+    public static function getLastPreviewId()
+    {
+        return self::$lastPreviewId;
+    }
+
+    public static function getConfiguredMailer()
+    {
+        return self::resolveConfiguredMailer();
+    }
+
     public static function testConnection()
     {
         try {
+            self::resetLastState();
+            if (self::resolveConfiguredMailer() === 'preview') {
+                self::$lastTransport = 'preview';
+                return true;
+            }
+
             $mail = self::init('smtp');
             if (!$mail) {
                 return false;

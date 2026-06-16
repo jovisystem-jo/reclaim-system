@@ -325,7 +325,42 @@ function create_verified_user(PDO $db, array $registrationData) {
     );
 
     $stmt = $db->prepare($sql);
-    return $stmt->execute($values);
+    if (!$stmt->execute($values)) {
+        return false;
+    }
+
+    return (int) $db->lastInsertId();
+}
+
+function send_register_success_notification($userId, array $registrationData) {
+    if ((int) $userId <= 0) {
+        return false;
+    }
+
+    require_once __DIR__ . '/includes/notification.php';
+
+    try {
+        $notification = new NotificationSystem();
+        return $notification->registrationSuccessful((int) $userId, [
+            'role' => $registrationData['role'] ?? 'user',
+        ]);
+    } catch (Throwable $e) {
+        error_log('Registration success notification failed for user ' . (int) $userId . ': ' . $e->getMessage());
+        return false;
+    }
+}
+
+function stage_register_success_notice(array $registrationData) {
+    $role = strtolower(trim((string) ($registrationData['role'] ?? 'user')));
+    $roleLabel = in_array($role, ['student', 'staff', 'admin'], true)
+        ? ucfirst($role)
+        : 'User';
+
+    $_SESSION['registration_success_notice'] = [
+        'title' => 'Registration Successful',
+        'message' => "Your {$roleLabel} account has been created successfully. Welcome to Reclaim System.",
+        'type' => 'success',
+    ];
 }
 
 $formData = register_form_defaults();
@@ -441,7 +476,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $error = 'Username already taken. Please register again with a different username.';
                             $showVerificationModal = false;
                         } else {
-                            if (create_verified_user($db, $pendingRegistration)) {
+                            $newUserId = create_verified_user($db, $pendingRegistration);
+                            if ($newUserId) {
+                                send_register_success_notification($newUserId, $pendingRegistration);
+                                stage_register_success_notice($pendingRegistration);
                                 clear_register_pending_data();
                                 clear_register_email_verification_data();
                                 session_regenerate_id(true);
@@ -696,7 +734,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $registrationData = $input;
                         $registrationData['password_hash'] = $passwordHash;
 
-                        if (create_verified_user($db, $registrationData)) {
+                        $newUserId = create_verified_user($db, $registrationData);
+                        if ($newUserId) {
+                            send_register_success_notification($newUserId, $registrationData);
+                            stage_register_success_notice($registrationData);
                             clear_register_pending_data();
                             clear_register_email_verification_data();
                             session_regenerate_id(true);

@@ -259,6 +259,22 @@ class NotificationSystem {
     }
 
     /**
+     * Notify a newly registered user that their account is ready.
+     */
+    public function registrationSuccessful($userId, array $user = []) {
+        $role = strtolower(trim((string) ($user['role'] ?? 'user')));
+        $roleLabel = in_array($role, ['student', 'staff', 'admin'], true)
+            ? ucfirst($role)
+            : 'User';
+
+        $title = 'Welcome to Reclaim System';
+        $message = "Your {$roleLabel} account has been created successfully.";
+        $message .= "\n\nYou can now sign in and start reporting lost or found items, tracking claims, and receiving updates from the system.";
+
+        return $this->send((int) $userId, $title, $message, 'success', true);
+    }
+
+    /**
      * Compare a newly reported item against open opposite-status items and notify the matched user.
      */
     public function processAutomaticItemMatches($itemId) {

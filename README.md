@@ -221,6 +221,7 @@ buildConfigField "String", "API_BASE_URL", "\"http://192.168.1.20/reclaim-system
 2. Ensure Apache and MySQL are running
 3. Confirm database credentials in `config/database.php`
 4. Confirm SMTP settings in `.env` / environment variables:
+   - `MAIL_MAILER` set to `preview` for localhost development or `smtp` for real email delivery
    - `SMTP_USERNAME`
    - `SMTP_PASSWORD`
    - optional `MAIL_FROM_EMAIL`

@@ -95,6 +95,12 @@ if (isset($_SESSION['userID'])) {
         $dashboard_nav_active = $current_dir === 'user' && $current_page === 'dashboard.php';
     }
 }
+
+$registrationSuccessNotice = null;
+if (isset($_SESSION['userID'], $_SESSION['registration_success_notice']) && is_array($_SESSION['registration_success_notice'])) {
+    $registrationSuccessNotice = $_SESSION['registration_success_notice'];
+    unset($_SESSION['registration_success_notice']);
+}
 ?>
 <?php if (!$embedded_layout): ?>
 <!DOCTYPE html>
@@ -413,6 +419,17 @@ if (isset($_SESSION['userID'])) {
             </div>
         </div>
     </nav>
+
+    <?php if ($registrationSuccessNotice): ?>
+        <div class="container mt-3">
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <strong><?= htmlspecialchars((string) ($registrationSuccessNotice['title'] ?? 'Success')) ?></strong>
+                <?= htmlspecialchars((string) ($registrationSuccessNotice['message'] ?? '')) ?>
+                <a href="<?= $notification_page ?>" class="alert-link ms-1">View notification</a>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        </div>
+    <?php endif; ?>
 
     <script>
     const baseUrl = '<?= $base_url ?>';
