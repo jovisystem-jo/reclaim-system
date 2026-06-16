@@ -23,16 +23,42 @@ class MailConfig
     {
         if (!class_exists(PHPMailer::class)) {
             self::$lastError = 'Email dependencies are not installed on the server.';
-            error_log('Email skipped: vendor/autoload.php or PHPMailer is unavailable.');
+            self::logDiagnostic('Email skipped: vendor/autoload.php or PHPMailer is unavailable.');
             return false;
         }
 
         return true;
     }
 
+    private static function logDiagnostic($message)
+    {
+        $message = '[' . date('Y-m-d H:i:s') . '] ' . trim((string) $message);
+        error_log($message);
+
+        $logDirectory = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'logs';
+        if (!is_dir($logDirectory) && !@mkdir($logDirectory, 0755, true) && !is_dir($logDirectory)) {
+            return;
+        }
+
+        @file_put_contents(
+            $logDirectory . DIRECTORY_SEPARATOR . 'mail.log',
+            $message . PHP_EOL,
+            FILE_APPEND
+        );
+    }
+
+    private static function isWebRequest()
+    {
+        return PHP_SAPI !== 'cli';
+    }
+
     private static function getEnvValue($name, $default = '')
     {
-        EnvLoader::load(__DIR__ . '/../.env');
+        try {
+            EnvLoader::load(__DIR__ . '/../.env');
+        } catch (\Throwable $exception) {
+            self::logDiagnostic('Unable to load mail environment settings: ' . $exception->getMessage());
+        }
 
         $value = EnvLoader::get($name, null);
         if ($value !== null && $value !== false) {
@@ -77,6 +103,12 @@ class MailConfig
         $configured = trim((string) self::getEnvValue('MAIL_MAILER', self::getEnvValue('MAIL_DRIVER', '')));
         if ($configured !== '') {
             return self::normalizeMailer($configured);
+        }
+
+        $smtpHost = trim((string) self::getEnvValue('SMTP_HOST', ''));
+        $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
+        if ($smtpHost !== '' || $smtpUsername !== '') {
+            return 'smtp';
         }
 
         return self::isProductionEnvironment() ? 'mail' : 'smtp';
@@ -129,6 +161,34 @@ class MailConfig
         }
 
         return 'smtp';
+    }
+
+    private static function normalizeSmtpHost($host)
+    {
+        return strtolower(trim((string) $host));
+    }
+
+    private static function isGmailSmtpHost($host)
+    {
+        $normalized = self::normalizeSmtpHost($host);
+        return in_array($normalized, ['smtp.gmail.com', 'smtp.googlemail.com'], true);
+    }
+
+    private static function formatSmtpProfileLabel(array $profile)
+    {
+        $host = $profile['host'] ?? 'smtp';
+        $port = (int) ($profile['port'] ?? 0);
+        $encryption = trim((string) ($profile['encryption'] ?? ''));
+
+        if ($encryption === PHPMailer::ENCRYPTION_STARTTLS) {
+            $encryption = 'tls';
+        } elseif ($encryption === PHPMailer::ENCRYPTION_SMTPS) {
+            $encryption = 'ssl';
+        } elseif ($encryption === '') {
+            $encryption = 'none';
+        }
+
+        return $host . ':' . $port . '/' . $encryption;
     }
 
     private static function detectAppHost()
@@ -235,6 +295,109 @@ class MailConfig
         return PHPMailer::ENCRYPTION_STARTTLS;
     }
 
+    private static function resolveSmtpTimeout($defaultTimeout)
+    {
+        $timeout = self::getEnvInt('SMTP_TIMEOUT', $defaultTimeout);
+        if ($timeout <= 0) {
+            $timeout = $defaultTimeout;
+        }
+
+        if (self::isWebRequest()) {
+            $webCap = self::getEnvInt('SMTP_WEB_TIMEOUT_CAP', 12);
+            if ($webCap > 0) {
+                $timeout = min($timeout, max(5, $webCap));
+            }
+        }
+
+        return max(5, $timeout);
+    }
+
+    private static function ensureRuntimeBudget($timeout)
+    {
+        if (!function_exists('set_time_limit')) {
+            return;
+        }
+
+        $currentLimit = (int) ini_get('max_execution_time');
+        if ($currentLimit === 0) {
+            return;
+        }
+
+        $buffer = max(5, self::getEnvInt('SMTP_EXECUTION_BUFFER', 8));
+        $desiredLimit = max($currentLimit, ((int) $timeout) + $buffer);
+        @set_time_limit($desiredLimit);
+    }
+
+    private static function buildBaseSmtpProfile()
+    {
+        $host = trim((string) self::getEnvValue('SMTP_HOST', 'smtp.gmail.com'));
+        $encryption = self::normalizeEncryption(
+            self::getEnvValue('SMTP_ENCRYPTION', self::getEnvValue('SMTP_SECURE', 'tls'))
+        );
+        $port = self::getEnvInt(
+            'SMTP_PORT',
+            $encryption === PHPMailer::ENCRYPTION_SMTPS ? 465 : 587
+        );
+
+        return [
+            'host' => $host,
+            'auth' => self::getEnvBoolean('SMTP_AUTH', true),
+            'username' => trim((string) self::getEnvValue('SMTP_USERNAME', '')),
+            'password' => self::normalizeSmtpPassword(self::getEnvValue('SMTP_PASSWORD', '')),
+            'encryption' => $encryption,
+            'port' => $port,
+            'auto_tls' => self::getEnvBoolean('SMTP_AUTO_TLS', $encryption !== ''),
+            'allow_self_signed' => self::getEnvBoolean('SMTP_ALLOW_SELF_SIGNED', false),
+            'helo' => trim((string) self::getEnvValue('SMTP_HELO_DOMAIN', '')),
+            'timeout' => self::resolveSmtpTimeout(self::isProductionEnvironment() ? 8 : 30),
+        ];
+    }
+
+    private static function uniqueSmtpProfiles(array $profiles)
+    {
+        $uniqueProfiles = [];
+        $seen = [];
+
+        foreach ($profiles as $profile) {
+            $signature = implode('|', [
+                self::normalizeSmtpHost($profile['host'] ?? ''),
+                (string) ($profile['port'] ?? ''),
+                (string) ($profile['encryption'] ?? ''),
+                !empty($profile['auto_tls']) ? '1' : '0',
+            ]);
+
+            if (isset($seen[$signature])) {
+                continue;
+            }
+
+            $seen[$signature] = true;
+            $uniqueProfiles[] = $profile;
+        }
+
+        return $uniqueProfiles;
+    }
+
+    private static function buildSmtpProfiles()
+    {
+        $baseProfile = self::buildBaseSmtpProfile();
+        $profiles = [$baseProfile];
+
+        if (self::isGmailSmtpHost($baseProfile['host'])) {
+            $profiles[] = array_merge($baseProfile, [
+                'port' => 587,
+                'encryption' => PHPMailer::ENCRYPTION_STARTTLS,
+                'auto_tls' => true,
+            ]);
+            $profiles[] = array_merge($baseProfile, [
+                'port' => 465,
+                'encryption' => PHPMailer::ENCRYPTION_SMTPS,
+                'auto_tls' => false,
+            ]);
+        }
+
+        return self::uniqueSmtpProfiles($profiles);
+    }
+
     private static function buildDefaultFromEmail($smtpUsername = '', $transport = 'smtp')
     {
         $configured = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', self::getEnvValue('SMTP_FROM_EMAIL', '')));
@@ -310,7 +473,7 @@ class MailConfig
         };
     }
 
-    public static function init($transportOverride = null)
+    public static function init($transportOverride = null, array $smtpProfile = null)
     {
         if (!self::dependenciesAvailable()) {
             return null;
@@ -341,26 +504,22 @@ class MailConfig
         } elseif ($transport === 'sendmail') {
             $mailer->isSendmail();
         } else {
-            $smtpTimeout = self::getEnvInt('SMTP_TIMEOUT', self::isProductionEnvironment() ? 8 : 30);
+            $smtpProfile = $smtpProfile ?: self::buildBaseSmtpProfile();
+            $smtpTimeout = max(5, (int) ($smtpProfile['timeout'] ?? self::resolveSmtpTimeout(self::isProductionEnvironment() ? 8 : 30)));
+            self::ensureRuntimeBudget($smtpTimeout);
             $mailer->isSMTP();
             $mailer->Timeout = $smtpTimeout;
             $mailer->getSMTPInstance()->Timelimit = max(5, $smtpTimeout + 2);
-            $mailer->Host = trim((string) self::getEnvValue('SMTP_HOST', 'smtp.gmail.com'));
-            $mailer->SMTPAuth = self::getEnvBoolean('SMTP_AUTH', true);
-            $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
+            $mailer->Host = trim((string) ($smtpProfile['host'] ?? 'smtp.gmail.com'));
+            $mailer->SMTPAuth = !empty($smtpProfile['auth']);
+            $smtpUsername = trim((string) ($smtpProfile['username'] ?? ''));
             $mailer->Username = $smtpUsername;
-            $mailer->Password = self::normalizeSmtpPassword(self::getEnvValue('SMTP_PASSWORD', ''));
+            $mailer->Password = (string) ($smtpProfile['password'] ?? '');
+            $mailer->SMTPSecure = (string) ($smtpProfile['encryption'] ?? '');
+            $mailer->Port = max(1, (int) ($smtpProfile['port'] ?? ($mailer->SMTPSecure === PHPMailer::ENCRYPTION_SMTPS ? 465 : 587)));
+            $mailer->SMTPAutoTLS = !empty($smtpProfile['auto_tls']);
 
-            $mailer->SMTPSecure = self::normalizeEncryption(
-                self::getEnvValue('SMTP_ENCRYPTION', self::getEnvValue('SMTP_SECURE', 'tls'))
-            );
-            $mailer->Port = self::getEnvInt(
-                'SMTP_PORT',
-                $mailer->SMTPSecure === PHPMailer::ENCRYPTION_SMTPS ? 465 : 587
-            );
-            $mailer->SMTPAutoTLS = self::getEnvBoolean('SMTP_AUTO_TLS', $mailer->SMTPSecure !== '');
-
-            if (self::getEnvBoolean('SMTP_ALLOW_SELF_SIGNED', false)) {
+            if (!empty($smtpProfile['allow_self_signed'])) {
                 $mailer->SMTPOptions = [
                     'ssl' => [
                         'verify_peer' => false,
@@ -370,7 +529,7 @@ class MailConfig
                 ];
             }
 
-            $heloDomain = trim((string) self::getEnvValue('SMTP_HELO_DOMAIN', ''));
+            $heloDomain = trim((string) ($smtpProfile['helo'] ?? ''));
             if ($heloDomain !== '') {
                 $mailer->Helo = $heloDomain;
             }
@@ -409,38 +568,62 @@ class MailConfig
             return self::writePreview($to, $subject, $body, $errorMessage);
         }
 
-        $mail = null;
+        $smtpProfiles = $transport === 'smtp' ? self::buildSmtpProfiles() : [null];
+        $attemptErrors = [];
 
-        try {
-            $mail = self::init($transport);
-            if (!$mail) {
-                $errorMessage = self::$lastError;
-                return false;
+        foreach ($smtpProfiles as $smtpProfile) {
+            $mail = null;
+            $attemptLabel = $transport;
+
+            if (is_array($smtpProfile)) {
+                $attemptLabel = self::formatSmtpProfileLabel($smtpProfile);
             }
 
-            if ($mail->Mailer === 'smtp' && $mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {
-                $errorMessage = 'SMTP credentials are not configured.';
-                return false;
+            try {
+                $mail = self::init($transport, $smtpProfile);
+                if (!$mail) {
+                    $profileError = self::$lastError;
+                    if ($profileError !== '') {
+                        $attemptErrors[] = $attemptLabel . ': ' . $profileError;
+                    }
+                    continue;
+                }
+
+                if ($mail->Mailer === 'smtp' && $mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {
+                    $profileError = 'SMTP credentials are not configured.';
+                    $attemptErrors[] = $attemptLabel . ': ' . $profileError;
+                    continue;
+                }
+
+                $mail->clearAllRecipients();
+                $mail->clearAttachments();
+                $mail->Subject = $subject;
+                $mail->isHTML(true);
+                $mail->Body = $body;
+                $mail->AltBody = strip_tags($body);
+                $mail->addAddress($to);
+
+                $sent = $mail->send();
+                if ($sent) {
+                    self::$lastTransport = $transport === 'smtp' ? $attemptLabel : $transport;
+                    return true;
+                }
+
+                $profileError = trim((string) ($mail->ErrorInfo ?? 'Unknown mail delivery error.'));
+                if ($profileError !== '') {
+                    $attemptErrors[] = $attemptLabel . ': ' . $profileError;
+                }
+            } catch (\Throwable $exception) {
+                $profileError = trim((string) (($mail && $mail->ErrorInfo !== '') ? $mail->ErrorInfo : $exception->getMessage()));
+                if ($profileError !== '') {
+                    $attemptErrors[] = $attemptLabel . ': ' . $profileError;
+                }
+                self::logDiagnostic('Mail attempt failed via ' . $attemptLabel . ' for ' . $to . ': ' . $profileError);
             }
-
-            $mail->clearAllRecipients();
-            $mail->clearAttachments();
-            $mail->Subject = $subject;
-            $mail->isHTML(true);
-            $mail->Body = $body;
-            $mail->AltBody = strip_tags($body);
-            $mail->addAddress($to);
-
-            $sent = $mail->send();
-            if ($sent) {
-                self::$lastTransport = $transport;
-            }
-
-            return $sent;
-        } catch (\Throwable $exception) {
-            $errorMessage = trim((string) (($mail && $mail->ErrorInfo !== '') ? $mail->ErrorInfo : $exception->getMessage()));
-            return false;
         }
+
+        $errorMessage = implode(' | ', $attemptErrors);
+        return false;
     }
 
     private static function buildTransportQueue($preferredTransport)
@@ -503,7 +686,7 @@ class MailConfig
             }
 
             if ($index < count($transportQueue) - 1) {
-                error_log(
+                self::logDiagnostic(
                     'Email delivery failed for ' . $to . ' via ' . $transport
                     . ($transportError !== '' ? ' (' . $transportError . ')' : '')
                     . ', trying next transport.'
@@ -516,7 +699,7 @@ class MailConfig
             self::$lastError = 'Unknown mail delivery error.';
         }
 
-        error_log('Email failed to ' . $to . ': ' . self::$lastError);
+        self::logDiagnostic('Email failed to ' . $to . ': ' . self::$lastError);
         return false;
     }
 
@@ -542,22 +725,22 @@ class MailConfig
 
     public static function testConnection()
     {
+        self::resetLastState();
+        $transportQueue = self::buildTransportQueue(self::resolveConfiguredMailer());
+        if ($transportQueue === ['preview']) {
+            self::$lastTransport = 'preview';
+            return true;
+        }
+
+        $testTransport = 'smtp';
+        foreach ($transportQueue as $candidate) {
+            if ($candidate !== 'preview') {
+                $testTransport = $candidate;
+                break;
+            }
+        }
+
         try {
-            self::resetLastState();
-            $transportQueue = self::buildTransportQueue(self::resolveConfiguredMailer());
-            if ($transportQueue === ['preview']) {
-                self::$lastTransport = 'preview';
-                return true;
-            }
-
-            $testTransport = 'smtp';
-            foreach ($transportQueue as $candidate) {
-                if ($candidate !== 'preview') {
-                    $testTransport = $candidate;
-                    break;
-                }
-            }
-
             $mail = self::init($testTransport);
             if (!$mail) {
                 return false;
@@ -572,15 +755,42 @@ class MailConfig
                 self::$lastError = 'SMTP credentials are not configured.';
                 return false;
             }
-
-            $mail->smtpConnect();
-            $mail->smtpClose();
-            self::$lastTransport = 'smtp';
-            return true;
         } catch (\Throwable $exception) {
-            self::$lastError = trim((string) (($mail->ErrorInfo ?? '') !== '' ? $mail->ErrorInfo : $exception->getMessage()));
+            self::$lastError = trim((string) $exception->getMessage());
             return false;
         }
+
+        $attemptErrors = [];
+        foreach (self::buildSmtpProfiles() as $smtpProfile) {
+            $profileLabel = self::formatSmtpProfileLabel($smtpProfile);
+
+            try {
+                $mail = self::init($testTransport, $smtpProfile);
+                if (!$mail) {
+                    if (self::$lastError !== '') {
+                        $attemptErrors[] = $profileLabel . ': ' . self::$lastError;
+                    }
+                    continue;
+                }
+
+                $mail->smtpConnect();
+                $mail->smtpClose();
+                self::$lastTransport = $profileLabel;
+                self::$lastError = '';
+                return true;
+            } catch (\Throwable $exception) {
+                $profileError = trim((string) (($mail->ErrorInfo ?? '') !== '' ? $mail->ErrorInfo : $exception->getMessage()));
+                if ($profileError !== '') {
+                    $attemptErrors[] = $profileLabel . ': ' . $profileError;
+                }
+            }
+        }
+
+        if ($attemptErrors !== []) {
+            self::$lastError = implode(' | ', $attemptErrors);
+        }
+
+        return false;
     }
 }
 ?>

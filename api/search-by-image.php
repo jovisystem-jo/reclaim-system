@@ -31,7 +31,7 @@ const CATEGORY_WEIGHT = 0.10;
 const HIGH_CONFIDENCE_IMAGE_THRESHOLD = 75.0;
 const HIGH_CONFIDENCE_IMAGGA_THRESHOLD = 70.0;
 const HIGH_CONFIDENCE_BOOST = 10.0;
-const MAX_RETURNED_MATCHES = 1;
+const MAX_RETURNED_MATCHES = 6;
 const MIN_MATCH_SCORE = 55.0;
 const MIN_DISPLAY_IMAGE_SCORE = 45.0;
 const MIN_VISUAL_SCORE = 60.0;
@@ -165,7 +165,8 @@ try {
             $warnings[] = 'Live tag extraction was unavailable, so the uploaded filename was used as a lightweight fallback.';
         }
     }
-    $uploadedObjectFamilies = detectObjectFamiliesFromTags($uploadedTags);
+    $informativeUploadedTags = filterInformativeUploadedTags($uploadedTags);
+    $uploadedObjectFamilies = detectObjectFamiliesFromTags($informativeUploadedTags);
     $pythonCommand = findPythonCommand();
 
     if ($pythonCommand === null) {
@@ -186,7 +187,8 @@ try {
         $itemText = buildItemSearchText($item);
         $itemKeywords = generateItemKeywords($item);
         $itemObjectFamilies = detectObjectFamiliesFromItem($item);
-        $sameObjectFamily = hasCompatibleObjectFamily($uploadedObjectFamilies, $itemObjectFamilies);
+        $objectFamilyDetected = !empty($uploadedObjectFamilies);
+        $sameObjectFamily = $objectFamilyDetected && hasCompatibleObjectFamily($uploadedObjectFamilies, $itemObjectFamilies);
 
         // Strict object-family gate:
         // If the uploaded image clearly detects a specific object type, never allow a different item type
@@ -195,7 +197,7 @@ try {
             continue;
         }
 
-        $matchedTags = getMatchedTags($uploadedTags, $itemKeywords, $itemText);
+        $matchedTags = getMatchedTags($informativeUploadedTags, $itemKeywords, $itemText);
 
         $imageMetrics = createEmptyImageMetrics();
         $itemImagePath = getFullImagePath((string) ($item['image_url'] ?? ''));
@@ -210,17 +212,18 @@ try {
         }
 
         $imageScore = round(clampPercent($imageMetrics['similarity'] ?? 0), 2);
-        $imaggaScore = round(calculateImaggaSimilarity($uploadedTags, $itemKeywords, $itemText), 2);
-        $jaccardScore = round(calculateJaccardSimilarity($uploadedTags, $itemKeywords), 2);
-        $categoryScore = round(calculateCategoryScore($uploadedTags, (string) ($item['category'] ?? '')), 2);
+        $imaggaScore = round(calculateImaggaSimilarity($informativeUploadedTags, $itemKeywords, $itemText), 2);
+        $jaccardScore = round(calculateJaccardSimilarity($informativeUploadedTags, $itemKeywords), 2);
+        $categoryScore = round(calculateCategoryScore($informativeUploadedTags, (string) ($item['category'] ?? '')), 2);
         $objectFamilyScore = $sameObjectFamily ? 100.0 : 0.0;
         $finalScore = round(calculateFinalScore($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $imageMetrics), 2);
-        if ($sameObjectFamily) {
+        if ($objectFamilyDetected && $sameObjectFamily) {
             $finalScore = max(
                 $finalScore,
                 calculateObjectFamilyConfidenceFloor($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $matchedTags)
             );
         }
+        $displayScore = round(calculateDisplayedSimilarityScore($imageScore), 2);
 
         $results[] = [
             'item_id' => (int) $item['item_id'],
@@ -230,19 +233,21 @@ try {
             'color' => (string) ($item['color'] ?? ''),
             'status' => (string) ($item['status'] ?? ''),
             'image_url' => (string) ($item['image_url'] ?? ''),
-            // Use the overall score for UI compatibility while keeping the raw visual score separately.
-            'image_score' => $finalScore,
+            // Keep image_score as the raw visual similarity so later filtering
+            // can rely on the actual ORB/color/shape output.
+            'image_score' => $imageScore,
             'imagga_score' => $imaggaScore,
             'jaccard_score' => $jaccardScore,
             'category_score' => $categoryScore,
             'object_family_score' => $objectFamilyScore,
             'uploaded_object_families' => array_values($uploadedObjectFamilies),
             'item_object_families' => array_values($itemObjectFamilies),
-            'family_allowed' => $sameObjectFamily,
+            'family_allowed' => $objectFamilyDetected ? $sameObjectFamily : true,
             'final_score' => $finalScore,
-            'match_level' => getMatchLevel($finalScore),
+            'match_level' => getMatchLevel($displayScore),
             'orb_score' => round(clampPercent($imageMetrics['orb_score'] ?? 0), 2),
             'histogram_score' => round(clampPercent($imageMetrics['histogram_score'] ?? 0), 2),
+            'shape_score' => round(clampPercent($imageMetrics['shape_score'] ?? 0), 2),
             'verified_matches' => max(0, (int) ($imageMetrics['verified_matches'] ?? 0)),
             'keypoints_image1' => max(0, (int) ($imageMetrics['keypoints_image1'] ?? 0)),
             'keypoints_image2' => max(0, (int) ($imageMetrics['keypoints_image2'] ?? 0)),
@@ -250,7 +255,7 @@ try {
             'match_reason' => buildMatchReason($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $matchedTags),
             // Compatibility fields used by the existing search UI.
             'visual_score' => $imageScore,
-            'similarity_percentage' => $finalScore,
+            'similarity_percentage' => $displayScore,
         ];
     }
 
@@ -258,24 +263,16 @@ try {
         $warnings[] = 'Image search reached the shared-hosting time budget, so only the items checked so far were compared.';
     }
 
-    usort($results, static function (array $left, array $right): int {
-        $scoreComparison = ($right['final_score'] <=> $left['final_score']);
-        if ($scoreComparison !== 0) {
-            return $scoreComparison;
-        }
+    sortImageSearchResults($results);
 
-        $visualComparison = ($right['visual_score'] <=> $left['visual_score']);
-        if ($visualComparison !== 0) {
-            return $visualComparison;
+    if (empty($uploadedObjectFamilies)) {
+        $inferredObjectFamilies = inferUploadedObjectFamiliesFromResults($results);
+        if (!empty($inferredObjectFamilies)) {
+            $uploadedObjectFamilies = $inferredObjectFamilies;
+            $results = applyInferredObjectFamiliesToResults($results, $uploadedObjectFamilies);
+            sortImageSearchResults($results);
         }
-
-        $imaggaComparison = ($right['imagga_score'] <=> $left['imagga_score']);
-        if ($imaggaComparison !== 0) {
-            return $imaggaComparison;
-        }
-
-        return ((int) $left['item_id']) <=> ((int) $right['item_id']);
-    });
+    }
 
     $relevantResults = array_values(array_filter($results, 'isRelevantMatch'));
     if (count($relevantResults) > MAX_RETURNED_MATCHES) {
@@ -293,9 +290,11 @@ try {
         'matches' => $relevantResults,
         'total_matches' => count($relevantResults),
         'top_match_category' => $topMatch['category'] ?? null,
-        'top_match_score' => isset($topMatch['final_score']) ? round((float) $topMatch['final_score'], 2) : 0.0,
+        'top_match_score' => isset($topMatch['similarity_percentage']) ? round((float) $topMatch['similarity_percentage'], 2) : 0.0,
         'message' => !empty($relevantResults)
-            ? 'Found the best confident match for the uploaded image.'
+            ? (count($relevantResults) > 1
+                ? 'Found confident matches for the uploaded image.'
+                : 'Found the best confident match for the uploaded image.')
             : 'No confident match was found for the uploaded image.',
     ];
 
@@ -524,6 +523,16 @@ function getGenericObjectWords(): array
         'stuff' => true,
         'container' => true,
         'case' => true,
+        'bag' => true,
+        'purse' => true,
+        'pouch' => true,
+        'accessory' => true,
+        'jewelry' => true,
+        'jewellery' => true,
+        'gem' => true,
+        'jewel' => true,
+        'ornament' => true,
+        '3d' => true,
         'label' => true,
         'product' => true,
         'plastic' => true,
@@ -538,6 +547,37 @@ function getGenericObjectWords(): array
         'gray' => true,
         'grey' => true,
     ];
+}
+
+function filterInformativeUploadedTags(array $tags): array
+{
+    $genericWords = getGenericObjectWords();
+    $informativeTags = [];
+
+    foreach (normalizeTagList($tags) as $tag) {
+        if ($tag === '' || isset($genericWords[$tag])) {
+            continue;
+        }
+
+        $tokens = tokenizePhrase($tag);
+        if (empty($tokens)) {
+            continue;
+        }
+
+        $hasInformativeToken = false;
+        foreach ($tokens as $token) {
+            if (!isset($genericWords[$token])) {
+                $hasInformativeToken = true;
+                break;
+            }
+        }
+
+        if ($hasInformativeToken) {
+            $informativeTags[] = $tag;
+        }
+    }
+
+    return array_values(array_unique($informativeTags));
 }
 
 function detectObjectFamiliesFromTags(array $tags): array
@@ -772,6 +812,14 @@ function tagMatchesItem(string $tag, array $itemKeywords, string $itemText): boo
         return true;
     }
 
+    $tagFamilies = detectObjectFamiliesFromText($normalizedTag, true);
+    if (!empty($tagFamilies)) {
+        $itemFamilies = detectObjectFamiliesFromText($normalizedText, false);
+        if (!empty(array_intersect($tagFamilies, $itemFamilies))) {
+            return true;
+        }
+    }
+
     $tagTokens = tokenizePhrase($normalizedTag);
     if (empty($tagTokens)) {
         return false;
@@ -864,11 +912,13 @@ function isRelevantMatch(array $result): bool
     }
 
     $finalScore = clampPercent((float) ($result['final_score'] ?? 0));
-    $imageScore = clampPercent((float) ($result['image_score'] ?? 0));
+    $imageScore = clampPercent((float) ($result['visual_score'] ?? $result['image_score'] ?? 0));
     $imaggaScore = clampPercent((float) ($result['imagga_score'] ?? 0));
     $jaccardScore = clampPercent((float) ($result['jaccard_score'] ?? 0));
     $categoryScore = clampPercent((float) ($result['category_score'] ?? 0));
     $orbScore = clampPercent((float) ($result['orb_score'] ?? 0));
+    $histogramScore = clampPercent((float) ($result['histogram_score'] ?? 0));
+    $shapeScore = clampPercent((float) ($result['shape_score'] ?? 0));
     $verifiedMatches = max(0, (int) ($result['verified_matches'] ?? 0));
     $matchedTags = $result['matched_tags'] ?? [];
     $sameObjectFamily = !empty($result['family_allowed']);
@@ -876,8 +926,12 @@ function isRelevantMatch(array $result): bool
         $imaggaScore >= MIN_SEMANTIC_IMAGGA_SCORE
         || ($imaggaScore >= 45.0 && $jaccardScore >= MIN_SEMANTIC_JACCARD_SCORE && ($categoryScore >= 100.0 || !empty($matchedTags)))
     );
+    $hasVerifiedVisualEvidence = $verifiedMatches >= 5 && $orbScore >= 15.0 && $imageScore >= 25.0;
+    $hasStrongColorShapeAgreement = $imageScore >= 35.0 && $histogramScore >= 55.0 && $shapeScore >= 60.0;
+    $semanticSupportedByVisual = $strongSemantic
+        && ($imageScore >= 55.0 || $hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement);
 
-    if ($imageScore < MIN_DISPLAY_IMAGE_SCORE && !($strongSemantic && $finalScore >= MIN_MATCH_SCORE)) {
+    if ($imageScore < MIN_DISPLAY_IMAGE_SCORE && !($strongSemantic && $finalScore >= MIN_MATCH_SCORE && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement))) {
         return false;
     }
 
@@ -890,18 +944,11 @@ function isRelevantMatch(array $result): bool
 
     $familySemanticMatch = (
         $sameObjectFamily
-        && (
-            $finalScore >= 45.0
-            || $imaggaScore >= 20.0
-            || $jaccardScore >= 5.0
-            || $categoryScore >= 100.0
-            || $imageScore >= 25.0
-            || !empty($matchedTags)
-        )
+        && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement)
     );
 
-    return ($sameObjectFamily && ($finalScore >= MIN_MATCH_SCORE || $strongVisual || $strongSemantic || $familySemanticMatch))
-        || (empty($result['uploaded_object_families'] ?? []) && ($finalScore >= MIN_MATCH_SCORE || $strongVisual || $strongSemantic));
+    return ($sameObjectFamily && ($strongVisual || $semanticSupportedByVisual || $familySemanticMatch))
+        || (empty($result['uploaded_object_families'] ?? []) && ($strongVisual || $semanticSupportedByVisual));
 }
 
 function getMatchLevel(float $score): string
@@ -963,6 +1010,112 @@ function buildMatchReason(
         : 'Potential match based on the available visual and semantic signals.';
 }
 
+function calculateDisplayedSimilarityScore(float $imageScore): float
+{
+    return clampPercent($imageScore);
+}
+
+function sortImageSearchResults(array &$results): void
+{
+    usort($results, static function (array $left, array $right): int {
+        $scoreComparison = ($right['final_score'] <=> $left['final_score']);
+        if ($scoreComparison !== 0) {
+            return $scoreComparison;
+        }
+
+        $visualComparison = ($right['visual_score'] <=> $left['visual_score']);
+        if ($visualComparison !== 0) {
+            return $visualComparison;
+        }
+
+        $imaggaComparison = ($right['imagga_score'] <=> $left['imagga_score']);
+        if ($imaggaComparison !== 0) {
+            return $imaggaComparison;
+        }
+
+        return ((int) $left['item_id']) <=> ((int) $right['item_id']);
+    });
+}
+
+function inferUploadedObjectFamiliesFromResults(array $results): array
+{
+    $topResult = $results[0] ?? null;
+    if (!is_array($topResult)) {
+        return [];
+    }
+
+    $topVisualScore = clampPercent((float) ($topResult['visual_score'] ?? 0));
+    $topVerifiedMatches = max(0, (int) ($topResult['verified_matches'] ?? 0));
+    $nextVisualScore = clampPercent((float) (($results[1]['visual_score'] ?? 0)));
+
+    if ($topVisualScore < 55.0 || $topVerifiedMatches < 5) {
+        return [];
+    }
+
+    if ($topVisualScore < 70.0 && ($topVisualScore - $nextVisualScore) < 12.0) {
+        return [];
+    }
+
+    $titleText = trim((string) ($topResult['title'] ?? ''));
+    $detailText = trim(implode(' ', array_filter([
+        (string) ($topResult['title'] ?? ''),
+        (string) ($topResult['description'] ?? ''),
+    ], static fn($value): bool => trim((string) $value) !== '')));
+
+    $families = detectObjectFamiliesFromText($titleText, false);
+    if (empty($families)) {
+        $families = detectObjectFamiliesFromText($detailText, false);
+    }
+
+    if (empty($families)) {
+        $families = array_values(array_filter(
+            (array) ($topResult['item_object_families'] ?? []),
+            static fn($value): bool => trim((string) $value) !== ''
+        ));
+    }
+
+    return array_values(array_unique($families));
+}
+
+function applyInferredObjectFamiliesToResults(array $results, array $uploadedObjectFamilies): array
+{
+    foreach ($results as &$result) {
+        $itemFamilies = array_values(array_filter(
+            (array) ($result['item_object_families'] ?? []),
+            static fn($value): bool => trim((string) $value) !== ''
+        ));
+        $sameObjectFamily = hasCompatibleObjectFamily($uploadedObjectFamilies, $itemFamilies);
+
+        $result['uploaded_object_families'] = array_values($uploadedObjectFamilies);
+        $result['family_allowed'] = $sameObjectFamily;
+        $result['object_family_score'] = $sameObjectFamily ? 100.0 : 0.0;
+
+        if (!$sameObjectFamily) {
+            continue;
+        }
+
+        $adjustedFinalScore = max(
+            clampPercent((float) ($result['final_score'] ?? 0)),
+            calculateObjectFamilyConfidenceFloor(
+                clampPercent((float) ($result['visual_score'] ?? 0)),
+                clampPercent((float) ($result['imagga_score'] ?? 0)),
+                clampPercent((float) ($result['jaccard_score'] ?? 0)),
+                clampPercent((float) ($result['category_score'] ?? 0)),
+                (array) ($result['matched_tags'] ?? [])
+            )
+        );
+
+        $result['final_score'] = round($adjustedFinalScore, 2);
+        $result['similarity_percentage'] = round(calculateDisplayedSimilarityScore(
+            clampPercent((float) ($result['visual_score'] ?? $result['image_score'] ?? 0))
+        ), 2);
+        $result['match_level'] = getMatchLevel((float) $result['similarity_percentage']);
+    }
+    unset($result);
+
+    return $results;
+}
+
 function calculateVisualSimilarity(string $imageOne, string $imageTwo, array $pythonCommand): array
 {
     $defaultMetrics = createEmptyImageMetrics();
@@ -993,6 +1146,7 @@ function calculateVisualSimilarity(string $imageOne, string $imageTwo, array $py
         'similarity' => clampPercent((float) ($payload['similarity'] ?? 0)),
         'orb_score' => clampPercent((float) ($payload['orb_score'] ?? 0)),
         'histogram_score' => clampPercent((float) ($payload['histogram_score'] ?? ($payload['hist_score'] ?? 0))),
+        'shape_score' => clampPercent((float) ($payload['shape_score'] ?? 0)),
         'verified_matches' => max(0, (int) ($payload['verified_matches'] ?? 0)),
         'keypoints_image1' => max(0, (int) ($payload['keypoints_image1'] ?? ($payload['features1'] ?? 0))),
         'keypoints_image2' => max(0, (int) ($payload['keypoints_image2'] ?? ($payload['features2'] ?? 0))),
@@ -1005,6 +1159,7 @@ function createEmptyImageMetrics(): array
         'similarity' => 0.0,
         'orb_score' => 0.0,
         'histogram_score' => 0.0,
+        'shape_score' => 0.0,
         'verified_matches' => 0,
         'keypoints_image1' => 0,
         'keypoints_image2' => 0,
@@ -1053,18 +1208,22 @@ function findPythonCommand(): ?array
 
     $configuredPython = trim((string) EnvLoader::get('PYTHON_PATH', ''));
 
-    $candidates = array_filter([
-        $configuredPython !== '' ? [$configuredPython] : null,
-        ['python'],
-        ['python3'],
-        ['py', '-3'],
-        ['C:\\Python39\\python.exe'],
-        ['C:\\Python310\\python.exe'],
-        ['C:\\Python311\\python.exe'],
-        ['C:\\Python312\\python.exe'],
-        ['C:\\Python313\\python.exe'],
-        ['C:\\Users\\' . getenv('USERNAME') . '\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'],
-    ]);
+    $candidates = array_merge(
+        array_values(array_filter([
+            $configuredPython !== '' ? [$configuredPython] : null,
+            ['python'],
+            ['python3'],
+            ['py', '-3'],
+            ['C:\\Python39\\python.exe'],
+            ['C:\\Python310\\python.exe'],
+            ['C:\\Python311\\python.exe'],
+            ['C:\\Python312\\python.exe'],
+            ['C:\\Python313\\python.exe'],
+            ['C:\\Python314\\python.exe'],
+            ['C:\\Users\\' . getenv('USERNAME') . '\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'],
+        ])),
+        discoverWindowsPythonCommands()
+    );
 
     foreach ($candidates as $candidate) {
         try {
@@ -1089,11 +1248,44 @@ function findPythonCommand(): ?array
     return null;
 }
 
+function discoverWindowsPythonCommands(): array
+{
+    $localAppData = rtrim((string) getenv('LOCALAPPDATA'), '\\/');
+    $userProfile = rtrim((string) getenv('USERPROFILE'), '\\/');
+
+    $patterns = array_filter([
+        $localAppData !== '' ? $localAppData . '\\Programs\\Python\\Python3*\\python.exe' : null,
+        $localAppData !== '' ? $localAppData . '\\Python\\pythoncore-*\\python.exe' : null,
+        $userProfile !== '' ? $userProfile . '\\AppData\\Local\\Programs\\Python\\Python3*\\python.exe' : null,
+        $userProfile !== '' ? $userProfile . '\\AppData\\Local\\Python\\pythoncore-*\\python.exe' : null,
+    ]);
+
+    $commands = [];
+    $seen = [];
+
+    foreach ($patterns as $pattern) {
+        $matches = glob($pattern) ?: [];
+        rsort($matches, SORT_NATURAL);
+
+        foreach ($matches as $match) {
+            $normalized = strtolower((string) $match);
+            if ($normalized === '' || isset($seen[$normalized])) {
+                continue;
+            }
+
+            $seen[$normalized] = true;
+            $commands[] = [$match];
+        }
+    }
+
+    return $commands;
+}
+
 function pythonSupportsImageComparison(array $pythonCommand): bool
 {
     try {
         $result = runCommand(
-            array_merge($pythonCommand, ['-c', 'import cv2, numpy; print("ok")']),
+            array_merge($pythonCommand, ['-c', 'import cv2, numpy; print(12345)']),
             PYTHON_DEPENDENCY_TIMEOUT_SECONDS
         );
     } catch (Throwable $exception) {
@@ -1106,7 +1298,7 @@ function pythonSupportsImageComparison(array $pythonCommand): bool
 
     $combinedOutput = trim(($result['stdout'] ?? '') . ' ' . ($result['stderr'] ?? ''));
 
-    return stripos($combinedOutput, 'ok') !== false;
+    return strpos($combinedOutput, '12345') !== false;
 }
 
 function canRunManagedSubprocesses(): bool
@@ -1292,9 +1484,42 @@ function expandUploadedTagKeywords(array $tags): array
         if ($collapsed !== '') {
             $keywords[$collapsed] = true;
         }
+
+        foreach (detectObjectFamiliesFromText($tag, true) as $family) {
+            $canonicalAlias = getCanonicalObjectFamilyAlias($family);
+            if ($canonicalAlias === '') {
+                continue;
+            }
+
+            foreach (tokenizePhrase($canonicalAlias) as $token) {
+                $keywords[$token] = true;
+            }
+
+            $collapsedCanonicalAlias = normalizeKeywordToken(str_replace(' ', '', $canonicalAlias));
+            if ($collapsedCanonicalAlias !== '') {
+                $keywords[$collapsedCanonicalAlias] = true;
+            }
+        }
     }
 
     return array_keys($keywords);
+}
+
+function getCanonicalObjectFamilyAlias(string $family): string
+{
+    $aliases = getObjectFamilyAliases();
+    if (!isset($aliases[$family]) || !is_array($aliases[$family])) {
+        return '';
+    }
+
+    foreach ($aliases[$family] as $alias) {
+        $normalizedAlias = normalizePhrase((string) $alias);
+        if ($normalizedAlias !== '') {
+            return $normalizedAlias;
+        }
+    }
+
+    return '';
 }
 
 function normalizeKeywordArray(array $keywords): array
@@ -1365,7 +1590,7 @@ function getCategoryAliases(string $category): array
 {
     $normalizedCategory = normalizePhrase($category);
     $aliases = [
-        'electronics' => ['electronics', 'electronic', 'phone', 'smartphone', 'mobile', 'laptop', 'tablet', 'charger', 'powerbank', 'earbud', 'earphone', 'headphone'],
+        'electronics' => ['electronics', 'electronic', 'phone', 'smartphone', 'mobile', 'laptop', 'tablet', 'charger', 'powerbank', 'earbud', 'earphone', 'headphone', 'headset', 'earpod', 'airpod', 'audio device', 'tws'],
         'documents' => ['documents', 'document', 'card', 'id', 'student id', 'passport', 'license', 'certificate'],
         'accessories' => ['accessories', 'accessory', 'watch', 'glasses', 'sunglasses', 'belt', 'cap', 'hat'],
         'clothing' => ['clothing', 'clothes', 'shirt', 'jacket', 'hoodie', 'pants', 'jeans', 'dress', 'shoe'],

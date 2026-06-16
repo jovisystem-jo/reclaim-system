@@ -23,7 +23,7 @@ if ($redirect !== '') {
     $redirect = ltrim($redirect, '/');
     if (
         preg_match('/^(https?:|\/\/)/i', $redirect) ||
-        str_contains($redirect, '..') ||
+        strpos($redirect, '..') !== false ||
         !preg_match('/^[A-Za-z0-9_\/.-]+\.php(\?.*)?$/', $redirect)
     ) {
         $redirect = '';

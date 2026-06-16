@@ -4,6 +4,24 @@
  * These functions keep security checks consistent across the project.
  */
 
+function set_app_env_value($name, $value, $overwrite = false) {
+    $name = trim((string) $name);
+    if ($name === '') {
+        return;
+    }
+
+    if (!$overwrite && getenv($name) !== false) {
+        return;
+    }
+
+    if (function_exists('putenv')) {
+        @putenv($name . '=' . $value);
+    }
+
+    $_ENV[$name] = $value;
+    $_SERVER[$name] = $value;
+}
+
 function loadEnvFile($path = null) {
     $path = $path ?: __DIR__ . '/../.env';
 
@@ -23,9 +41,7 @@ function loadEnvFile($path = null) {
 
         // Security: do not overwrite variables already set by Apache/Windows.
         if ($name !== '' && getenv($name) === false) {
-            putenv($name . '=' . $value);
-            $_ENV[$name] = $value;
-            $_SERVER[$name] = $value;
+            set_app_env_value($name, $value);
         }
     }
 }

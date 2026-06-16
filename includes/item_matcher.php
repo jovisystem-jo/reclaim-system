@@ -353,18 +353,22 @@ class AutomaticItemMatchService {
     private function findPythonCommand() {
         $configuredPython = trim((string) getenv('PYTHON_PATH'));
 
-        $candidates = array_filter([
-            $configuredPython !== '' ? [$configuredPython] : null,
-            ['python'],
-            ['python3'],
-            ['py', '-3'],
-            ['C:\\Python39\\python.exe'],
-            ['C:\\Python310\\python.exe'],
-            ['C:\\Python311\\python.exe'],
-            ['C:\\Python312\\python.exe'],
-            ['C:\\Python313\\python.exe'],
-            ['C:\\Users\\' . getenv('USERNAME') . '\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'],
-        ]);
+        $candidates = array_merge(
+            array_values(array_filter([
+                $configuredPython !== '' ? [$configuredPython] : null,
+                ['python'],
+                ['python3'],
+                ['py', '-3'],
+                ['C:\\Python39\\python.exe'],
+                ['C:\\Python310\\python.exe'],
+                ['C:\\Python311\\python.exe'],
+                ['C:\\Python312\\python.exe'],
+                ['C:\\Python313\\python.exe'],
+                ['C:\\Python314\\python.exe'],
+                ['C:\\Users\\' . getenv('USERNAME') . '\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'],
+            ])),
+            $this->discoverWindowsPythonCandidates()
+        );
 
         foreach ($candidates as $candidate) {
             try {
@@ -380,6 +384,38 @@ class AutomaticItemMatchService {
         }
 
         return null;
+    }
+
+    private function discoverWindowsPythonCandidates() {
+        $localAppData = rtrim((string) getenv('LOCALAPPDATA'), '\\/');
+        $userProfile = rtrim((string) getenv('USERPROFILE'), '\\/');
+
+        $patterns = array_filter([
+            $localAppData !== '' ? $localAppData . '\\Programs\\Python\\Python3*\\python.exe' : null,
+            $localAppData !== '' ? $localAppData . '\\Python\\pythoncore-*\\python.exe' : null,
+            $userProfile !== '' ? $userProfile . '\\AppData\\Local\\Programs\\Python\\Python3*\\python.exe' : null,
+            $userProfile !== '' ? $userProfile . '\\AppData\\Local\\Python\\pythoncore-*\\python.exe' : null,
+        ]);
+
+        $commands = [];
+        $seen = [];
+
+        foreach ($patterns as $pattern) {
+            $matches = glob($pattern) ?: [];
+            rsort($matches, SORT_NATURAL);
+
+            foreach ($matches as $match) {
+                $normalized = strtolower((string) $match);
+                if ($normalized === '' || isset($seen[$normalized])) {
+                    continue;
+                }
+
+                $seen[$normalized] = true;
+                $commands[] = [$match];
+            }
+        }
+
+        return $commands;
     }
 
     private function runCommand(array $commandParts) {

@@ -553,6 +553,19 @@ small, .small {
     font-size: 0.8rem;
 }
 
+/* Hide the browser's native password reveal icon when we render our own toggle button. */
+.password-field-group input[type="password"]::-ms-reveal,
+.password-field-group input[type="password"]::-ms-clear {
+    display: none;
+}
+
+.password-field-group input[type="password"]::-webkit-credentials-auto-fill-button,
+.password-field-group input[type="password"]::-webkit-strong-password-auto-fill-button {
+    visibility: hidden;
+    display: none !important;
+    pointer-events: none;
+}
+
 textarea.form-control {
     min-height: 80px;
     padding-top: 8px;

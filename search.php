@@ -16,9 +16,12 @@ $highest_match = null;
 $highest_match_category = '';
 $image_analysis_data = null;
 $is_image_search = false;
+$direct_image_match_count = 0;
+$related_category_item_count = 0;
 
 const IMAGE_CATEGORY_EXPANSION_THRESHOLD = 55.0;
 const MIN_IMAGE_RESULT_SCORE = 45.0;
+const ENABLE_IMAGE_CATEGORY_SUGGESTIONS = false;
 
 // Get filter values
 $search_query = $_GET['query'] ?? '';
@@ -77,14 +80,18 @@ if ($image_analysis_id > 0) {
                     continue;
                 }
 
+                $match['visual_score'] = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
+                $match['image_score'] = $match['visual_score'];
+                $match['similarity_percentage'] = calculateStoredDisplaySimilarityScore($match);
+                $match['match_level'] = getMatchLevel($match['similarity_percentage']);
                 $image_scores[$itemId] = $match;
             }
         }
 
         if (!empty($image_scores)) {
             uasort($image_scores, static function ($left, $right) {
-                $leftImageScore = (float) ($left['image_score'] ?? $left['visual_score'] ?? $left['similarity_percentage'] ?? 0);
-                $rightImageScore = (float) ($right['image_score'] ?? $right['visual_score'] ?? $right['similarity_percentage'] ?? 0);
+                $leftImageScore = (float) ($left['visual_score'] ?? $left['image_score'] ?? $left['similarity_percentage'] ?? 0);
+                $rightImageScore = (float) ($right['visual_score'] ?? $right['image_score'] ?? $right['similarity_percentage'] ?? 0);
 
                 if ($rightImageScore !== $leftImageScore) {
                     return $rightImageScore <=> $leftImageScore;
@@ -94,6 +101,7 @@ if ($image_analysis_id > 0) {
             });
 
             $image_match_ids = array_values(array_map('intval', array_keys($image_scores)));
+            $direct_image_match_count = count($image_match_ids);
             $highest_match = reset($image_scores) ?: null;
             if ($highest_match && isset($highest_match['item_id'])) {
                 if (trim((string) ($highest_match['color'] ?? '')) === '') {
@@ -106,8 +114,9 @@ if ($image_analysis_id > 0) {
                 }
 
                 $highest_match_category = trim((string) ($highest_match['category'] ?? ''));
-                $image_match_ids = [(int) $highest_match['item_id']];
-                $image_search_notice = 'Showing the best AI match for the uploaded image.';
+                $image_search_notice = $direct_image_match_count > 1
+                    ? 'Showing AI matches ranked by similarity for the uploaded image.'
+                    : 'Showing the best AI match for the uploaded image.';
             }
         }
         if (empty($image_match_ids) && $image_search_notice === '') {
@@ -222,6 +231,8 @@ if (!empty($search_results)) {
 }
 
 if (
+    ENABLE_IMAGE_CATEGORY_SUGGESTIONS
+    &&
     $is_image_search
     && $highest_match
     && $highest_match_category !== ''
@@ -268,35 +279,46 @@ if (
         }
 
         $relatedItem['is_related_category_item'] = true;
+        $relatedItem['similarity_percentage'] = calculateRelatedCategoryScore($highest_match, $relatedItem);
+        $relatedItem['match_level'] = 'Same Category Suggestion';
+        $relatedItem['match_source_label'] = 'Same Category';
+        $relatedItem['match_reason'] = 'Shown because it shares the same category as the top AI match.';
         $search_results[] = $relatedItem;
+        $related_category_item_count++;
     }
 
-    if (count($search_results) > 1) {
-        $image_search_notice = 'Showing the best AI match and other items from the same category.';
+    if ($direct_image_match_count > 1 && $related_category_item_count > 0) {
+        $image_search_notice = "Showing {$direct_image_match_count} AI matches with scored results and {$related_category_item_count} other item(s) from the same category.";
+    } elseif ($direct_image_match_count > 1) {
+        $image_search_notice = "Showing {$direct_image_match_count} AI matches ranked by similarity for the uploaded image.";
+    } elseif ($related_category_item_count > 0) {
+        $image_search_notice = "Showing the best AI match and {$related_category_item_count} other item(s) from the same category.";
     }
 }
 
 // Merge scores with search results
 foreach ($search_results as &$item) {
     if (isset($image_scores[$item['item_id']])) {
-        $item['visual_score'] = $image_scores[$item['item_id']]['image_score']
-            ?? $image_scores[$item['item_id']]['visual_score']
+        $item['visual_score'] = $image_scores[$item['item_id']]['visual_score']
+            ?? $image_scores[$item['item_id']]['image_score']
             ?? 0;
-        $item['image_score'] = $image_scores[$item['item_id']]['image_score']
-            ?? $image_scores[$item['item_id']]['visual_score']
+        $item['image_score'] = $image_scores[$item['item_id']]['visual_score']
+            ?? $image_scores[$item['item_id']]['image_score']
             ?? 0;
         $item['imagga_score'] = $image_scores[$item['item_id']]['imagga_score'] ?? 0;
         $item['jaccard_score'] = $image_scores[$item['item_id']]['jaccard_score'] ?? 0;
         $item['category_score'] = $image_scores[$item['item_id']]['category_score'] ?? 0;
         $item['orb_score'] = $image_scores[$item['item_id']]['orb_score'] ?? 0;
         $item['histogram_score'] = $image_scores[$item['item_id']]['histogram_score'] ?? 0;
+        $item['shape_score'] = $image_scores[$item['item_id']]['shape_score'] ?? 0;
         $item['verified_matches'] = $image_scores[$item['item_id']]['verified_matches'] ?? 0;
         $item['matched_tags'] = $image_scores[$item['item_id']]['matched_tags'] ?? [];
         $item['similarity_percentage'] = $image_scores[$item['item_id']]['similarity_percentage']
-            ?? $image_scores[$item['item_id']]['image_score']
             ?? $image_scores[$item['item_id']]['visual_score']
+            ?? $image_scores[$item['item_id']]['image_score']
             ?? 0;
         $item['match_level'] = $image_scores[$item['item_id']]['match_level'] ?? getMatchLevel($item['similarity_percentage'] ?? 0);
+        $item['match_source_label'] = 'AI Match';
         $item['match_reason'] = $image_scores[$item['item_id']]['match_reason'] ?? '';
         
         // Mark if this is the highest match
@@ -310,6 +332,13 @@ unset($item);
 // Re-sort by similarity score
 if ($is_image_search && !empty($image_scores)) {
     usort($search_results, function($a, $b) {
+        $aIsRelated = !empty($a['is_related_category_item']);
+        $bIsRelated = !empty($b['is_related_category_item']);
+
+        if ($aIsRelated !== $bIsRelated) {
+            return $aIsRelated <=> $bIsRelated;
+        }
+
         $scoreA = $a['similarity_percentage'] ?? 0;
         $scoreB = $b['similarity_percentage'] ?? 0;
         return $scoreB <=> $scoreA;
@@ -368,15 +397,19 @@ function isConfidentStoredImageMatch(array $match) {
     }
 
     $finalScore = (float) ($match['final_score'] ?? $match['similarity_percentage'] ?? 0);
-    $imageScore = (float) ($match['image_score'] ?? $match['visual_score'] ?? 0);
+    $imageScore = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
     $imaggaScore = (float) ($match['imagga_score'] ?? 0);
     $jaccardScore = (float) ($match['jaccard_score'] ?? 0);
     $categoryScore = (float) ($match['category_score'] ?? 0);
     $orbScore = (float) ($match['orb_score'] ?? 0);
+    $histogramScore = (float) ($match['histogram_score'] ?? 0);
+    $shapeScore = (float) ($match['shape_score'] ?? 0);
     $verifiedMatches = (int) ($match['verified_matches'] ?? 0);
     $matchedTags = $match['matched_tags'] ?? [];
+    $hasVerifiedVisualEvidence = $verifiedMatches >= 5 && $orbScore >= 15 && $imageScore >= 25;
+    $hasStrongColorShapeAgreement = $imageScore >= 35 && $histogramScore >= 55 && $shapeScore >= 60;
 
-    if ($imageScore < MIN_IMAGE_RESULT_SCORE) {
+    if ($imageScore < MIN_IMAGE_RESULT_SCORE && !($finalScore >= 55 && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement))) {
         return false;
     }
 
@@ -391,8 +424,17 @@ function isConfidentStoredImageMatch(array $match) {
         $imaggaScore >= 60
         || ($imaggaScore >= 45 && $jaccardScore >= 12 && ($categoryScore >= 100 || !empty($matchedTags)))
     );
+    $semanticSupportedByVisual = $strongSemantic
+        && ($imageScore >= 55 || $hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement);
 
-    return $finalScore >= 55 || $strongVisual || $strongSemantic;
+    $sameObjectFamily = !empty($match['family_allowed']);
+    $familySemanticMatch = (
+        $sameObjectFamily
+        && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement)
+    );
+
+    return ($sameObjectFamily && ($strongVisual || $semanticSupportedByVisual || $familySemanticMatch))
+        || (empty($match['uploaded_object_families'] ?? []) && ($strongVisual || $semanticSupportedByVisual));
 }
 
 function getMatchLevel($score) {
@@ -401,6 +443,49 @@ function getMatchLevel($score) {
     if ($score >= 50) return 'Possible Match';
     if ($score >= 30) return 'Low Match';
     return 'Potential Match';
+}
+
+function calculateStoredDisplaySimilarityScore(array $match): float
+{
+    $imageScore = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
+    return max(0.0, min(100.0, $imageScore));
+}
+
+function calculateRelatedCategoryScore(array $referenceMatch, array $candidateItem): float
+{
+    $score = 16.0;
+
+    $referenceCategory = trim(strtolower((string) ($referenceMatch['category'] ?? '')));
+    $candidateCategory = trim(strtolower((string) ($candidateItem['category'] ?? '')));
+    if ($referenceCategory !== '' && $referenceCategory === $candidateCategory) {
+        $score += 10.0;
+    }
+
+    if (colorsAreCompatible(
+        (string) ($referenceMatch['color'] ?? ''),
+        (string) ($candidateItem['color'] ?? '')
+    )) {
+        $score += 8.0;
+    }
+
+    $referenceTokens = extractTextMatchTokens(
+        trim((string) (($referenceMatch['title'] ?? '') . ' ' . ($referenceMatch['description'] ?? '')))
+    );
+    $candidateTokens = extractTextMatchTokens(
+        trim((string) (($candidateItem['title'] ?? '') . ' ' . ($candidateItem['description'] ?? '')))
+    );
+
+    if (!empty($referenceTokens) && !empty($candidateTokens)) {
+        $sharedTokenCount = count(array_intersect($referenceTokens, $candidateTokens));
+        $score += min(6.0, $sharedTokenCount * 2.0);
+    }
+
+    $referenceConfidence = (float) ($referenceMatch['final_score'] ?? $referenceMatch['similarity_percentage'] ?? 0);
+    if ($referenceConfidence >= 70) {
+        $score += 4.0;
+    }
+
+    return round(min(44.0, $score), 1);
 }
 
 function colorsAreCompatible(string $referenceColor, string $candidateColor): bool
@@ -706,6 +791,38 @@ function colorPhraseContains(string $normalizedText, string $normalizedAlias): b
         font-size: 0.85rem;
         font-weight: 700;
         color: #FF6B35;
+    }
+    .match-source-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 8px;
+        margin-bottom: 4px;
+        flex-wrap: wrap;
+    }
+    .match-source-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+    }
+    .match-source-badge.ai-match {
+        background: rgba(29, 78, 216, 0.12);
+        color: #1d4ed8;
+    }
+    .match-source-badge.related-match {
+        background: rgba(255, 140, 0, 0.16);
+        color: #c96a00;
+    }
+    .match-level-text {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: #6c757d;
     }
     .progress-bar-custom {
         height: 6px;
@@ -1190,10 +1307,20 @@ function colorPhraseContains(string $normalizedText, string $normalizedAlias): b
                                         <!-- AI Similarity - Search by Image only -->
                                         <?php if ($is_image_search && isset($item['similarity_percentage']) && $item['similarity_percentage'] > 0):
                                             $match_score = (float) $item['similarity_percentage'];
+                                            $is_related_match = !empty($item['is_related_category_item']);
+                                            $match_source_label = $item['match_source_label'] ?? ($is_related_match ? 'Same Category' : 'AI Match');
+                                            $match_level_text = $item['match_level'] ?? getMatchLevel($match_score);
                                         ?>
                                         <div class="similarity-container">
+                                            <div class="match-source-row">
+                                                <span class="match-source-badge <?= $is_related_match ? 'related-match' : 'ai-match' ?>">
+                                                    <i class="fas <?= $is_related_match ? 'fa-layer-group' : 'fa-brain' ?>"></i>
+                                                    <?= htmlspecialchars($match_source_label) ?>
+                                                </span>
+                                                <span class="match-level-text"><?= htmlspecialchars($match_level_text) ?></span>
+                                            </div>
                                             <div class="similarity-label">
-                                                <span><i class="fas fa-chart-line"></i> AI Similarity</span>
+                                                <span><i class="fas fa-chart-line"></i> <?= $is_related_match ? 'Match Score' : 'AI Similarity' ?></span>
                                                 <span class="similarity-percentage"><?= round($match_score) ?>%</span>
                                             </div>
                                             <div class="progress-bar-custom">

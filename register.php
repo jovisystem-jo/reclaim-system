@@ -18,7 +18,7 @@ if ($redirect !== '') {
     $redirect = ltrim($redirect, '/');
     if (
         preg_match('/^(https?:|\/\/)/i', $redirect) ||
-        str_contains($redirect, '..') ||
+        strpos($redirect, '..') !== false ||
         !preg_match('/^[A-Za-z0-9_\/.-]+\.php(\?.*)?$/', $redirect)
     ) {
         $redirect = '';
@@ -52,6 +52,18 @@ function register_json_response(array $payload, int $statusCode = 200) {
     exit();
 }
 
+function register_log_issue($message) {
+    $message = '[' . date('Y-m-d H:i:s') . '] ' . trim((string) $message);
+    error_log($message);
+
+    $logDirectory = __DIR__ . '/storage/logs';
+    if (!is_dir($logDirectory) && !@mkdir($logDirectory, 0755, true) && !is_dir($logDirectory)) {
+        return;
+    }
+
+    @file_put_contents($logDirectory . '/register.log', $message . PHP_EOL, FILE_APPEND);
+}
+
 if ($isAjaxEmailVerificationRequest) {
     register_shutdown_function(static function (): void {
         $error = error_get_last();
@@ -63,6 +75,15 @@ if ($isAjaxEmailVerificationRequest) {
         if (!in_array($error['type'] ?? 0, $fatalTypes, true)) {
             return;
         }
+
+        register_log_issue(
+            'Fatal verification request error: '
+            . ($error['message'] ?? 'Unknown error')
+            . ' in '
+            . ($error['file'] ?? 'unknown file')
+            . ':'
+            . ($error['line'] ?? 0)
+        );
 
         if (!headers_sent()) {
             register_json_response([
@@ -183,32 +204,37 @@ function mask_register_email($email) {
 }
 
 function send_register_otp_email($email, $name, $otpCode) {
-    require_once 'config/mail.php';
+    try {
+        require_once 'config/mail.php';
 
-    $subject = 'Your Reclaim System verification code';
-    $safeName = htmlspecialchars($name !== '' ? $name : 'User', ENT_QUOTES, 'UTF-8');
-    $safeCode = htmlspecialchars($otpCode, ENT_QUOTES, 'UTF-8');
-    $body = '
-        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937;">
-            <h2 style="margin-bottom: 16px; color: #111827;">Verify your email address</h2>
-            <p style="margin-bottom: 16px;">Hi ' . $safeName . ',</p>
-            <p style="margin-bottom: 16px;">
-                Use the verification code below to complete your Reclaim System registration:
-            </p>
-            <div style="margin: 24px 0; padding: 18px; text-align: center; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px;">
-                <span style="font-size: 32px; letter-spacing: 8px; font-weight: 700; color: #ea580c;">' . $safeCode . '</span>
+        $subject = 'Your Reclaim System verification code';
+        $safeName = htmlspecialchars($name !== '' ? $name : 'User', ENT_QUOTES, 'UTF-8');
+        $safeCode = htmlspecialchars($otpCode, ENT_QUOTES, 'UTF-8');
+        $body = '
+            <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937;">
+                <h2 style="margin-bottom: 16px; color: #111827;">Verify your email address</h2>
+                <p style="margin-bottom: 16px;">Hi ' . $safeName . ',</p>
+                <p style="margin-bottom: 16px;">
+                    Use the verification code below to complete your Reclaim System registration:
+                </p>
+                <div style="margin: 24px 0; padding: 18px; text-align: center; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px;">
+                    <span style="font-size: 32px; letter-spacing: 8px; font-weight: 700; color: #ea580c;">' . $safeCode . '</span>
+                </div>
+                <p style="margin-bottom: 12px;">This code will expire in 5 minutes.</p>
+                <p style="margin-bottom: 0;">If you did not request this registration, you can ignore this email.</p>
             </div>
-            <p style="margin-bottom: 12px;">This code will expire in 5 minutes.</p>
-            <p style="margin-bottom: 0;">If you did not request this registration, you can ignore this email.</p>
-        </div>
-    ';
+        ';
 
-    $result = MailConfig::sendNotification($email, $subject, $body);
-    if (!$result) {
-        error_log('Registration OTP email failed for ' . $email . ': ' . MailConfig::getLastError());
+        $result = MailConfig::sendNotification($email, $subject, $body);
+        if (!$result) {
+            register_log_issue('Registration OTP email failed for ' . $email . ': ' . MailConfig::getLastError());
+        }
+
+        return $result;
+    } catch (Throwable $exception) {
+        register_log_issue('Registration OTP email crashed for ' . $email . ': ' . $exception->getMessage());
+        return false;
     }
-
-    return $result;
 }
 
 function stage_register_email_verification($email, $otpCode, array $draft = []) {
@@ -414,23 +440,24 @@ $emailIsVerified = register_email_is_verified($formData['email']);
 $verificationModalIsRegistrationFlow = $pendingRegistration !== null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $formAction = $_POST['form_action'] ?? 'start_registration';
-    $isAjaxEmailVerification = $isAjaxEmailVerificationRequest;
+    try {
+        $formAction = $_POST['form_action'] ?? 'start_registration';
+        $isAjaxEmailVerification = $isAjaxEmailVerificationRequest;
 
-    if ($isAjaxEmailVerification) {
-        if (!verify_csrf_token(request_csrf_token())) {
-            register_json_response([
-                'success' => false,
-                'message' => 'Invalid security token. Please refresh the page and try again.',
-            ], 403);
+        if ($isAjaxEmailVerification) {
+            if (!verify_csrf_token(request_csrf_token())) {
+                register_json_response([
+                    'success' => false,
+                    'message' => 'Invalid security token. Please refresh the page and try again.',
+                ], 403);
+            }
+        } else {
+            require_csrf_token();
         }
-    } else {
-        require_csrf_token();
-    }
 
-    $db = Database::getInstance()->getConnection();
+        $db = Database::getInstance()->getConnection();
 
-    if ($formAction === 'verify_otp') {
+        if ($formAction === 'verify_otp') {
         $pendingRegistration = register_pending_data();
         $emailVerificationSession = register_email_verification_data();
 
@@ -761,10 +788,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    $pendingRegistration = register_pending_data();
-    $emailVerificationSession = register_email_verification_data();
-    $emailIsVerified = register_email_is_verified($formData['email']);
-    $verificationModalIsRegistrationFlow = $pendingRegistration !== null;
+        $pendingRegistration = register_pending_data();
+        $emailVerificationSession = register_email_verification_data();
+        $emailIsVerified = register_email_is_verified($formData['email']);
+        $verificationModalIsRegistrationFlow = $pendingRegistration !== null;
+    } catch (Throwable $exception) {
+        register_log_issue(
+            'Registration request failed'
+            . ($isAjaxEmailVerificationRequest ? ' during AJAX email verification' : '')
+            . ': ' . $exception->getMessage()
+            . ' in ' . $exception->getFile() . ':' . $exception->getLine()
+        );
+
+        if ($isAjaxEmailVerificationRequest) {
+            register_json_response([
+                'success' => false,
+                'message' => 'Unable to process the verification request right now. Please try again later.',
+            ], 500);
+        }
+
+        $error = 'Unable to process your request right now. Please try again later.';
+        $showVerificationModal = false;
+    }
 }
 ?>
 <!DOCTYPE html>
