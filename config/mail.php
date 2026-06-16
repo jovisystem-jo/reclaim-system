@@ -87,6 +87,11 @@ class MailConfig
         return self::getEnvBoolean('MAIL_FALLBACK_TO_MAIL', self::isProductionEnvironment());
     }
 
+    private static function shouldFallbackToSendmail()
+    {
+        return self::getEnvBoolean('MAIL_FALLBACK_TO_SENDMAIL', self::shouldFallbackToMail());
+    }
+
     private static function shouldFallbackToPreview()
     {
         return self::getEnvBoolean('MAIL_FALLBACK_TO_PREVIEW', !self::isProductionEnvironment());
@@ -107,6 +112,10 @@ class MailConfig
     {
         $normalized = strtolower(trim((string) $mailer));
 
+        if (in_array($normalized, ['auto', 'automatic'], true)) {
+            return 'auto';
+        }
+
         if (in_array($normalized, ['preview', 'file', 'log'], true)) {
             return 'preview';
         }
@@ -120,6 +129,37 @@ class MailConfig
         }
 
         return 'smtp';
+    }
+
+    private static function detectAppHost()
+    {
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '')));
+        $host = preg_replace('/:\d+$/', '', $host) ?? '';
+        $host = preg_replace('/^www\./i', '', $host) ?? '';
+
+        if ($host !== '') {
+            return $host;
+        }
+
+        $appUrlHost = parse_url((string) self::getEnvValue('APP_URL', ''), PHP_URL_HOST);
+        if (is_string($appUrlHost) && $appUrlHost !== '') {
+            $appUrlHost = preg_replace('/^www\./i', '', $appUrlHost) ?? $appUrlHost;
+            if ($appUrlHost !== '') {
+                return $appUrlHost;
+            }
+        }
+
+        $mailDomain = trim((string) self::getEnvValue('MAIL_DOMAIN', ''));
+        if ($mailDomain !== '') {
+            return preg_replace('/^www\./i', '', $mailDomain) ?? $mailDomain;
+        }
+
+        return '';
+    }
+
+    private static function isValidMailbox($email)
+    {
+        return $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL);
     }
 
     private static function resetLastState()
@@ -195,37 +235,66 @@ class MailConfig
         return PHPMailer::ENCRYPTION_STARTTLS;
     }
 
-    private static function buildDefaultFromEmail($smtpUsername = '')
+    private static function buildDefaultFromEmail($smtpUsername = '', $transport = 'smtp')
     {
         $configured = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', self::getEnvValue('SMTP_FROM_EMAIL', '')));
         if ($configured !== '') {
             return $configured;
         }
 
-        if ($smtpUsername !== '' && filter_var($smtpUsername, FILTER_VALIDATE_EMAIL)) {
+        $localOverride = trim((string) self::getEnvValue('MAIL_LOCAL_FROM_EMAIL', ''));
+        if (in_array($transport, ['mail', 'sendmail'], true) && self::isValidMailbox($localOverride)) {
+            return $localOverride;
+        }
+
+        $host = self::detectAppHost();
+        $domainBasedFrom = '';
+        if ($host !== '' && self::isValidMailbox('noreply@' . $host)) {
+            $domainBasedFrom = 'noreply@' . $host;
+        }
+
+        if (in_array($transport, ['mail', 'sendmail'], true) && $domainBasedFrom !== '') {
+            return $domainBasedFrom;
+        }
+
+        if ($smtpUsername !== '' && self::isValidMailbox($smtpUsername)) {
             return $smtpUsername;
         }
 
-        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '')));
-        $host = preg_replace('/:\d+$/', '', $host) ?? '';
-        $host = preg_replace('/^www\./i', '', $host) ?? '';
-
-        if ($host === '') {
-            $appUrlHost = parse_url((string) self::getEnvValue('APP_URL', ''), PHP_URL_HOST);
-            if (is_string($appUrlHost) && $appUrlHost !== '') {
-                $host = preg_replace('/^www\./i', '', $appUrlHost) ?? $appUrlHost;
-            }
-        }
-
-        if ($host === '') {
-            $host = trim((string) self::getEnvValue('MAIL_DOMAIN', ''));
-        }
-
-        if ($host !== '' && filter_var('noreply@' . $host, FILTER_VALIDATE_EMAIL)) {
-            return 'noreply@' . $host;
+        if ($domainBasedFrom !== '') {
+            return $domainBasedFrom;
         }
 
         return 'noreply@localhost';
+    }
+
+    private static function buildReturnPathEmail($fromEmail)
+    {
+        $configured = trim((string) self::getEnvValue('MAIL_RETURN_PATH_EMAIL', ''));
+        if (self::isValidMailbox($configured)) {
+            return $configured;
+        }
+
+        if (self::isValidMailbox($fromEmail)) {
+            return $fromEmail;
+        }
+
+        $host = self::detectAppHost();
+        if ($host !== '' && self::isValidMailbox('mailer@' . $host)) {
+            return 'mailer@' . $host;
+        }
+
+        return '';
+    }
+
+    private static function buildHostname()
+    {
+        $configured = trim((string) self::getEnvValue('MAIL_HOSTNAME', self::getEnvValue('SMTP_HELO_DOMAIN', '')));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return self::detectAppHost();
     }
 
     private static function configureDebugOutput($mailer)
@@ -256,6 +325,15 @@ class MailConfig
         $transport = $transportOverride !== null
             ? self::normalizeMailer($transportOverride)
             : self::resolveConfiguredMailer();
+        if ($transport === 'auto') {
+            $queue = self::buildTransportQueue($transport);
+            foreach ($queue as $candidate) {
+                if ($candidate !== 'preview') {
+                    $transport = $candidate;
+                    break;
+                }
+            }
+        }
         $smtpUsername = '';
 
         if ($transport === 'mail') {
@@ -298,13 +376,23 @@ class MailConfig
             }
         }
 
-        $fromEmail = self::buildDefaultFromEmail($smtpUsername);
+        $fromEmail = self::buildDefaultFromEmail($smtpUsername, $transport);
         $fromName = trim((string) self::getEnvValue('MAIL_FROM_NAME', self::getEnvValue('SMTP_FROM_NAME', 'Reclaim System')));
         if ($fromName === '') {
             $fromName = 'Reclaim System';
         }
 
+        $hostname = self::buildHostname();
+        if ($hostname !== '') {
+            $mailer->Hostname = $hostname;
+        }
+
         $mailer->setFrom($fromEmail, $fromName);
+
+        $returnPath = self::buildReturnPathEmail($fromEmail);
+        if ($returnPath !== '') {
+            $mailer->Sender = $returnPath;
+        }
 
         $replyToEmail = trim((string) self::getEnvValue('MAIL_REPLY_TO_EMAIL', ''));
         if ($replyToEmail !== '' && filter_var($replyToEmail, FILTER_VALIDATE_EMAIL)) {
@@ -355,44 +443,75 @@ class MailConfig
         }
     }
 
+    private static function buildTransportQueue($preferredTransport)
+    {
+        $preferred = self::normalizeMailer($preferredTransport);
+
+        if ($preferred === 'preview') {
+            return ['preview'];
+        }
+
+        if ($preferred === 'auto') {
+            $queue = self::isProductionEnvironment()
+                ? ['mail', 'sendmail', 'smtp']
+                : ['smtp', 'mail', 'sendmail'];
+        } elseif ($preferred === 'smtp') {
+            $queue = ['smtp'];
+            if (self::shouldFallbackToMail()) {
+                $queue[] = 'mail';
+            }
+            if (self::shouldFallbackToSendmail()) {
+                $queue[] = 'sendmail';
+            }
+        } elseif ($preferred === 'sendmail') {
+            $queue = ['sendmail'];
+            if (self::shouldFallbackToMail()) {
+                $queue[] = 'mail';
+            }
+        } else {
+            $queue = ['mail'];
+            if (self::shouldFallbackToSendmail()) {
+                $queue[] = 'sendmail';
+            }
+        }
+
+        if (self::shouldFallbackToPreview()) {
+            $queue[] = 'preview';
+        }
+
+        return array_values(array_unique($queue));
+    }
+
     public static function sendNotification($to, $subject, $body)
     {
         self::resetLastState();
-        $primaryTransport = self::resolveConfiguredMailer();
-        $primaryError = '';
+        $preferredTransport = self::resolveConfiguredMailer();
+        $transportQueue = self::buildTransportQueue($preferredTransport);
+        $attemptErrors = [];
 
-        if (self::sendWithTransport($primaryTransport, $to, $subject, $body, $primaryError)) {
-            self::$lastError = '';
-            return true;
-        }
+        foreach ($transportQueue as $index => $transport) {
+            $transportError = '';
 
-        if ($primaryTransport === 'smtp' && self::shouldFallbackToMail()) {
-            error_log('SMTP email delivery failed for ' . $to . ', retrying with PHP mail(): ' . $primaryError);
-
-            $fallbackError = '';
-            if (self::sendWithTransport('mail', $to, $subject, $body, $fallbackError)) {
+            if (self::sendWithTransport($transport, $to, $subject, $body, $transportError)) {
                 self::$lastError = '';
                 return true;
             }
 
-            if ($fallbackError !== '') {
-                $primaryError = $fallbackError;
+            $transportError = trim((string) $transportError);
+            if ($transportError !== '') {
+                $attemptErrors[] = $transport . ': ' . $transportError;
+            }
+
+            if ($index < count($transportQueue) - 1) {
+                error_log(
+                    'Email delivery failed for ' . $to . ' via ' . $transport
+                    . ($transportError !== '' ? ' (' . $transportError . ')' : '')
+                    . ', trying next transport.'
+                );
             }
         }
 
-        if ($primaryTransport !== 'preview' && self::shouldFallbackToPreview()) {
-            $previewError = '';
-            if (self::sendWithTransport('preview', $to, $subject, $body, $previewError)) {
-                self::$lastError = '';
-                return true;
-            }
-
-            if ($previewError !== '') {
-                $primaryError = $previewError;
-            }
-        }
-
-        self::$lastError = trim((string) $primaryError);
+        self::$lastError = implode(' | ', $attemptErrors);
         if (self::$lastError === '') {
             self::$lastError = 'Unknown mail delivery error.';
         }
@@ -425,17 +544,27 @@ class MailConfig
     {
         try {
             self::resetLastState();
-            if (self::resolveConfiguredMailer() === 'preview') {
+            $transportQueue = self::buildTransportQueue(self::resolveConfiguredMailer());
+            if ($transportQueue === ['preview']) {
                 self::$lastTransport = 'preview';
                 return true;
             }
 
-            $mail = self::init('smtp');
+            $testTransport = 'smtp';
+            foreach ($transportQueue as $candidate) {
+                if ($candidate !== 'preview') {
+                    $testTransport = $candidate;
+                    break;
+                }
+            }
+
+            $mail = self::init($testTransport);
             if (!$mail) {
                 return false;
             }
 
             if ($mail->Mailer !== 'smtp') {
+                self::$lastTransport = $testTransport;
                 return true;
             }
 
@@ -446,6 +575,7 @@ class MailConfig
 
             $mail->smtpConnect();
             $mail->smtpClose();
+            self::$lastTransport = 'smtp';
             return true;
         } catch (\Throwable $exception) {
             self::$lastError = trim((string) (($mail->ErrorInfo ?? '') !== '' ? $mail->ErrorInfo : $exception->getMessage()));

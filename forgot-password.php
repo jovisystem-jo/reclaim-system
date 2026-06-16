@@ -123,7 +123,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Unable to process your request right now. Please try again later.';
         } catch (Throwable $e) {
             error_log('Forgot password error: ' . $e->getMessage());
-            $error = 'Unable to process your request right now. Please try again later.';
+            $mailError = class_exists('MailConfig') ? trim((string) MailConfig::getLastError()) : '';
+            $error = $mailError !== ''
+                ? 'Unable to send the reset email right now. Please try again later.'
+                : 'Unable to process your request right now. Please try again later.';
         }
     }
 }
