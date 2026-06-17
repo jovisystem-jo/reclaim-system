@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Reclaim System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/style.css">
+    <style>
+        .role-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            height: 100%;
+        }
+        .role-card:hover {
+            border-color: #FF8C00;
+            background: #fff8f0;
+        }
+        .role-card.selected {
+            border-color: #FF8C00;
+            background: linear-gradient(135deg, #fff8f0, #fff0e0);
+            box-shadow: 0 5px 15px rgba(255, 140, 0, 0.2);
+        }
+        .role-card i {
+            font-size: 48px;
+            margin-bottom: 10px;
+            color: #FF8C00;
+        }
+        .role-card h6 {
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        .role-card p {
+            font-size: 12px;
+            color: #666;
+            margin: 0;
+        }
+        .role-input {
+            display: none;
+        }
+        .required-field::after {
+            content: '*';
+            color: red;
+            margin-left: 4px;
+        }
+    </style>
+</head>
+<body class="auth-page">
+    <main class="auth-shell">
+        <div class="container content-wrapper">
+            <div class="row justify-content-center">
+                <div class="col-lg-8 col-md-10">
+                <div class="card fade-in auth-card">
+                    <div class="card-header text-center">
+                        <h3><i class="fas fa-user-plus"></i> Create Account</h3>
+                        <p>Join Reclaim System today</p>
+                    </div>
+                    <div class="card-body">
+                                                                        
+                        <form method="POST" action="" id="registerForm">
+                            <input type="hidden" name="csrf_token" value="9e3bc87438ea509b8ac3e4e6821b0aa03b4325b28fdb9127a15163f434435257">                            <input type="hidden" name="form_action" value="start_registration">
+                            <!-- Role Selection Section -->
+                            <div class="mb-4">
+                                <label class="form-label required-field">I am a:</label>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <div class="role-card" data-role="student" onclick="selectRole('student')">
+                                            <i class="fas fa-user-graduate"></i>
+                                            <h6>Student</h6>
+                                            <p>Currently enrolled student</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <div class="role-card" data-role="staff" onclick="selectRole('staff')">
+                                            <i class="fas fa-chalkboard-teacher"></i>
+                                            <h6>Staff</h6>
+                                            <p>Faculty or administrative staff</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <input type="hidden" name="role" id="roleInput" value="student">
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="name" class="form-label required-field">Full Name</label>
+                                    <input type="text" class="form-control" id="name" name="name" value="" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="username" class="form-label required-field">Username</label>
+                                    <input type="text" class="form-control" id="username" name="username" value="" required>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="email" class="form-label required-field">Email</label>
+                                    <input type="email" class="form-control" id="email" name="email" value="" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="phone" class="form-label">Phone Number</label>
+                                    <input type="tel" class="form-control" id="phone" name="phone" value="">
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="password" class="form-label required-field">Password</label>
+                                    <input type="password" class="form-control" id="password" name="password" minlength="8" pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}" title="Password must be at least 8 characters and include uppercase, lowercase, number, and special character." required>
+                                    <small class="text-muted">Minimum 8 characters with uppercase, lowercase, number, and special character</small>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="confirm_password" class="form-label required-field">Confirm Password</label>
+                                    <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="student_staff_id" class="form-label required-field" id="idLabel">Student ID</label>
+                                    <input type="text" class="form-control" id="student_staff_id" name="student_staff_id" 
+                                           value=""
+                                           placeholder="e.g., A123456">
+                                    <small class="text-muted" id="idHelpText">Enter your matriculation/student ID number</small>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="department" class="form-label required-field">Faculty / Department</label>
+                                    <select class="form-control" id="department" name="department" required>
+                                        <option value="">-- Select Faculty --</option>
+                                                                                    <option value="Faculty of Civil Engineering and Built Environment (FKAAB)" >
+                                                Faculty of Civil Engineering and Built Environment (FKAAB)                                            </option>
+                                                                                    <option value="Faculty of Electric and Electronic Engineering (FKEE)" >
+                                                Faculty of Electric and Electronic Engineering (FKEE)                                            </option>
+                                                                                    <option value="Faculty of Mechanical and Manufacturing Engineering (FKMP)" >
+                                                Faculty of Mechanical and Manufacturing Engineering (FKMP)                                            </option>
+                                                                                    <option value="Faculty of Technical and Vocational Education (FPTV)" >
+                                                Faculty of Technical and Vocational Education (FPTV)                                            </option>
+                                                                                    <option value="Faculty of Technology Management and Business (FPTP)" >
+                                                Faculty of Technology Management and Business (FPTP)                                            </option>
+                                                                                    <option value="Faculty of Applied Science and Technology (FAST)" >
+                                                Faculty of Applied Science and Technology (FAST)                                            </option>
+                                                                                    <option value="Faculty of Science Computer and Information Technology (FSKTM)" >
+                                                Faculty of Science Computer and Information Technology (FSKTM)                                            </option>
+                                                                                    <option value="Faculty of Engineering Technology (FTK)" >
+                                                Faculty of Engineering Technology (FTK)                                            </option>
+                                                                            </select>
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-user-plus"></i> Register
+                                </button>
+                            </div>
+                        </form>
+                        
+                        <div class="text-center mt-3">
+                            <p>Already have an account? <a href="login.php">Login here</a></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </main>
+
+    <div class="modal fade" id="emailVerificationModal" tabindex="-1" aria-labelledby="emailVerificationModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="emailVerificationModalLabel"><i class="fas fa-envelope-open-text"></i> Verify Your Email</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">
+                        Enter the 6-digit verification code sent to
+                        <strong></strong>.
+                    </p>
+                    <p class="text-muted small mb-3">The code expires in 5 minutes.</p>
+
+                                        
+                    <form method="POST" action="" id="verificationForm">
+                        <input type="hidden" name="csrf_token" value="9e3bc87438ea509b8ac3e4e6821b0aa03b4325b28fdb9127a15163f434435257">                        <input type="hidden" name="form_action" value="verify_otp">
+                        <div class="mb-3">
+                            <label for="verification_code" class="form-label required-field">Verification Code</label>
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="verification_code"
+                                name="verification_code"
+                                inputmode="numeric"
+                                pattern="\d{6}"
+                                maxlength="6"
+                                autocomplete="one-time-code"
+                                placeholder="Enter 6-digit code"
+                                required
+                            >
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-check-circle"></i> Verify & Complete Registration
+                            </button>
+                        </div>
+                    </form>
+
+                    <form method="POST" action="" class="mt-3 text-center">
+                        <input type="hidden" name="csrf_token" value="9e3bc87438ea509b8ac3e4e6821b0aa03b4325b28fdb9127a15163f434435257">                        <input type="hidden" name="form_action" value="resend_otp">
+                        <button type="submit" class="btn btn-link text-decoration-none">Resend Code</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Role selection function
+        function selectRole(role) {
+            // Update hidden input
+            document.getElementById('roleInput').value = role;
+            
+            // Update UI for role cards
+            document.querySelectorAll('.role-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.querySelector(`.role-card[data-role="${role}"]`).classList.add('selected');
+            
+            // Update labels based on role
+            const idLabel = document.getElementById('idLabel');
+            const idHelpText = document.getElementById('idHelpText');
+            const studentStaffId = document.getElementById('student_staff_id');
+            
+            if (role === 'student') {
+                idLabel.innerHTML = 'Student ID';
+                idHelpText.innerHTML = 'Enter your matriculation/student ID number';
+                studentStaffId.placeholder = 'e.g., A123456 or D202312345';
+            } else {
+                idLabel.innerHTML = 'Staff ID';
+                idHelpText.innerHTML = 'Enter your staff ID number';
+                studentStaffId.placeholder = 'e.g., STF001 or EMP12345';
+            }
+        }
+        
+        // Set initial selected role based on POST data or default
+        const initialRole = 'student';
+        selectRole(initialRole);
+        
+        // Password confirmation validation
+        const password = document.getElementById('password');
+        const confirmPassword = document.getElementById('confirm_password');
+
+        function validatePasswordStrength() {
+            const value = password.value;
+            let message = '';
+
+            if (value && value.length < 8) {
+                message = 'Password must be at least 8 characters long.';
+            } else if (value && !/[A-Z]/.test(value)) {
+                message = 'Password must include at least 1 uppercase letter.';
+            } else if (value && !/[a-z]/.test(value)) {
+                message = 'Password must include at least 1 lowercase letter.';
+            } else if (value && !/\d/.test(value)) {
+                message = 'Password must include at least 1 number.';
+            } else if (value && !/[^A-Za-z0-9]/.test(value)) {
+                message = 'Password must include at least 1 special character.';
+            }
+
+            password.setCustomValidity(message);
+        }
+        
+        function validatePassword() {
+            validatePasswordStrength();
+
+            if (password.value !== confirmPassword.value) {
+                confirmPassword.setCustomValidity('Passwords do not match');
+            } else {
+                confirmPassword.setCustomValidity('');
+            }
+        }
+        
+        password.addEventListener('input', validatePassword);
+        password.addEventListener('change', validatePassword);
+        confirmPassword.addEventListener('keyup', validatePassword);
+        
+        // Form validation before submit
+        document.getElementById('registerForm').addEventListener('submit', function(e) {
+            const role = document.getElementById('roleInput').value;
+            const studentStaffId = document.getElementById('student_staff_id').value;
+
+            validatePassword();
+            
+            if (!studentStaffId.trim()) {
+                e.preventDefault();
+                alert(role === 'student' ? 'Please enter your Student ID' : 'Please enter your Staff ID');
+                return false;
+            }
+        });
+
+            </script>
+</body>
+</html>

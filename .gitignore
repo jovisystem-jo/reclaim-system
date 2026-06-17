@@ -1,21 +1,4 @@
-# Local secrets and environment-specific config
+# Local secrets — never commit real credentials
 .env
-config/*.json
-config/env.php
 
-# Installed dependencies
-vendor/
 
-# User-uploaded files
-assets/uploads/*
-!assets/uploads/.htaccess
-
-# Runtime session files
-storage/sessions/*
-!storage/sessions/.gitignore
-storage/mail-previews/*
-!storage/mail-previews/.gitignore
-
-# Local registration test artifacts
-register*_cookies*.txt
-register_test_page.html
