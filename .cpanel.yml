@@ -10,4 +10,3 @@ deployment:
     - /usr/bin/find "$DEPLOYPATH" -type d -exec /bin/chmod 755 {} +
     - /usr/bin/find "$DEPLOYPATH" -type f -exec /bin/chmod 644 {} +
     - /bin/test ! -f "$DEPLOYPATH/.env" || /bin/chmod 600 "$DEPLOYPATH/.env"
-    - cd "$DEPLOYPATH" && if [ -x /opt/cpanel/composer/bin/composer ]; then /opt/cpanel/composer/bin/composer install --no-dev --optimize-autoloader; elif command -v composer >/dev/null 2>&1; then composer install --no-dev --optimize-autoloader; else echo "Composer not found on server; skipping vendor install."; fi
