@@ -1,6 +1,7 @@
 <?php
 require_once '../config/database.php';
 require_once '../includes/auth.php';
+require_once '../includes/functions.php';
 requireAdmin();
 
 $db = Database::getInstance()->getConnection();
@@ -38,13 +39,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get all non-admin users
-$stmt = $db->prepare("
-    SELECT * FROM users 
-    WHERE role != 'admin' 
-    ORDER BY created_at DESC
-");
-$stmt->execute();
-$users = $stmt->fetchAll();
+$users = [];
+try {
+    $usersHasCreatedAt = reclaimTableColumnExists($db, 'users', 'created_at');
+    $orderBy = $usersHasCreatedAt ? 'created_at DESC, user_id DESC' : 'user_id DESC';
+
+    $stmt = $db->prepare("
+        SELECT * FROM users 
+        WHERE role != 'admin' 
+        ORDER BY {$orderBy}
+    ");
+    $stmt->execute();
+    $users = $stmt->fetchAll();
+} catch (PDOException $e) {
+    error_log('Admin manage users load failed: ' . $e->getMessage());
+    $error = 'Unable to load the user list right now.';
+}
 
 $base_url = app_base_path();
 ?>
@@ -140,7 +150,7 @@ $base_url = app_base_path();
 <body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
-            <?php include 'sidebar.php'; ?>
+            <?php include __DIR__ . '/sidebar.php'; ?>
             
             <div class="col-md-10 main-content content-wrapper">
                 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -202,7 +212,7 @@ $base_url = app_base_path();
                                                     <?= $user['is_active'] ? 'Active' : 'Inactive' ?>
                                                 </span>
                                             </td>
-                                            <td><?= date('M d, Y', strtotime($user['created_at'])) ?></td>
+                                            <td><?= htmlspecialchars(reclaimFormatDate($user['created_at'] ?? null, 'M d, Y')) ?></td>
                                             <td>
                                                 <div class="d-flex gap-2">
                                                     <form method="POST" style="display: inline;">

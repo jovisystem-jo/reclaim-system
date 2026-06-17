@@ -1,17 +1,26 @@
 <?php
-require_once '../config/database.php';
-require_once '../includes/auth.php';
-require_once '../includes/admin_signature.php';
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/admin_signature.php';
+require_once __DIR__ . '/../includes/functions.php';
 requireAdmin();
-require_once '../includes/notification.php';
 
 $db = Database::getInstance()->getConnection();
-$notification = new NotificationSystem();
+$notification = null;
 $message = '';
 $error = '';
 $base_url = app_base_path();
 
+try {
+    require_once __DIR__ . '/../includes/notification.php';
+    $notification = new NotificationSystem();
+} catch (Throwable $e) {
+    error_log('Admin verify-claims notification bootstrap failed: ' . $e->getMessage());
+}
+
 $admin_signature = reclaimGetAdminSignature($db, (int) ($_SESSION['userID'] ?? 0), $base_url);
+$usersHasCreatedAt = reclaimTableColumnExists($db, 'users', 'created_at');
+$claimantJoinedDateSelect = $usersHasCreatedAt ? 'u.created_at as claimant_joined_date' : 'NULL as claimant_joined_date';
 
 // Handle claim verification
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id']) && isset($_POST['action'])) {
@@ -67,7 +76,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id']) && isset(
                     $claimantMessage .= "📝 Admin Notes: $admin_notes\n\n";
                 }
                 $claimantMessage .= "Thank you for using Reclaim System!";
-                $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'success');
+                if ($notification) {
+                    $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'success');
+                }
                 
                 $founderTitle = "📦 Your Found Item Has Been Claimed!";
                 $founderMessage = "Good news! The item you reported as found has been claimed by the rightful owner.\n\n";
@@ -75,7 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id']) && isset(
                 $founderMessage .= "👤 Claimed by: {$claim['claimant_name']}\n";
                 $founderMessage .= "📍 Item was kept at: {$claim['delivery_location']}\n\n";
                 $founderMessage .= "Thank you for your honesty! 🎉";
-                $notification->send($claim['founder_id'], $founderTitle, $founderMessage, 'success');
+                if ($notification) {
+                    $notification->send($claim['founder_id'], $founderTitle, $founderMessage, 'success');
+                }
                 
                 $stmt = $db->prepare("UPDATE items SET status = 'returned' WHERE item_id = ?");
                 $stmt->execute([$claim['item_id']]);
@@ -86,7 +99,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_id']) && isset(
                     $claimantMessage .= "📝 Reason: $admin_notes\n\n";
                 }
                 $claimantMessage .= "Contact support if you have questions.";
-                $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'danger');
+                if ($notification) {
+                    $notification->send($claim['claimant_id'], $claimantTitle, $claimantMessage, 'danger');
+                }
             }
             
             $message = "Claim $status successfully.";
@@ -102,7 +117,7 @@ $stmt = $db->prepare("
            i.found_location, i.delivery_location, i.brand, i.color,
            u.name as claimant_name, u.email as claimant_email, u.phone as claimant_phone,
            u.student_staff_id as claimant_student_id, u.department as claimant_department,
-           u.created_at as claimant_joined_date
+           {$claimantJoinedDateSelect}
     FROM claim_requests c
     JOIN items i ON c.item_id = i.item_id
     JOIN users u ON c.claimant_id = u.user_id
@@ -512,7 +527,7 @@ if (!empty($pending_claims)) {
 <body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
-            <?php include 'sidebar.php'; ?>
+            <?php include __DIR__ . '/sidebar.php'; ?>
             
             <div class="col-md-10 main-content content-wrapper">
                 <!-- Page Header -->

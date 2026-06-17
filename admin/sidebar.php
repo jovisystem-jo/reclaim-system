@@ -1,8 +1,15 @@
 <?php
-$current_page = basename($_SERVER['PHP_SELF']);
-require_once '../includes/notification.php';
-$notifSystem = new NotificationSystem();
-$unreadCount = $notifSystem->getUnreadCount($_SESSION['userID']);
+$current_page = basename($_SERVER['PHP_SELF'] ?? '');
+$unreadCount = 0;
+
+try {
+    require_once __DIR__ . '/../includes/notification.php';
+    $notifSystem = new NotificationSystem();
+    $unreadCount = (int) $notifSystem->getUnreadCount($_SESSION['userID'] ?? 0);
+} catch (Throwable $e) {
+    error_log('Admin sidebar notification preload failed: ' . $e->getMessage());
+    $unreadCount = 0;
+}
 ?>
 <div class="col-md-2 p-0 sidebar">
     <div class="admin-profile text-center pt-4 pb-3">

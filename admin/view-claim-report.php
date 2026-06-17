@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/admin_signature.php';
 require_once __DIR__ . '/../includes/claim_status.php';
+require_once __DIR__ . '/../includes/functions.php';
 
 // Allow both admin and authenticated users to view their own claim reports
 $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
@@ -18,6 +19,8 @@ if ($claimId == 0) {
 $db = Database::getInstance()->getConnection();
 $base_url = app_base_path();
 reclaimEnsureClaimStatusSchema($db);
+$usersHasCreatedAt = reclaimTableColumnExists($db, 'users', 'created_at');
+$claimantJoinedDateSelect = $usersHasCreatedAt ? 'u.created_at as claimant_joined_date' : 'NULL as claimant_joined_date';
 
 // First, check if claim exists and get basic info
 if ($isAdmin) {
@@ -27,7 +30,7 @@ if ($isAdmin) {
                i.found_location, i.delivery_location, i.brand, i.color,
                u.name as claimant_name, u.email as claimant_email, u.phone as claimant_phone,
                u.student_staff_id as claimant_student_id, u.department as claimant_department,
-               u.created_at as claimant_joined_date
+               {$claimantJoinedDateSelect}
         FROM claim_requests c
         JOIN items i ON c.item_id = i.item_id
         JOIN users u ON c.claimant_id = u.user_id
@@ -41,7 +44,7 @@ if ($isAdmin) {
                i.found_location, i.delivery_location, i.brand, i.color,
                u.name as claimant_name, u.email as claimant_email, u.phone as claimant_phone,
                u.student_staff_id as claimant_student_id, u.department as claimant_department,
-               u.created_at as claimant_joined_date
+               {$claimantJoinedDateSelect}
         FROM claim_requests c
         JOIN items i ON c.item_id = i.item_id
         JOIN users u ON c.claimant_id = u.user_id

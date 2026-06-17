@@ -1,6 +1,7 @@
 <?php
 require_once '../config/database.php';
 require_once '../includes/auth.php';
+require_once '../includes/functions.php';
 requireAdmin();
 
 $db = Database::getInstance()->getConnection();
@@ -357,7 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
-            <?php include 'sidebar.php'; ?>
+            <?php include __DIR__ . '/sidebar.php'; ?>
             
             <div class="col-md-10 main-content content-wrapper">
                 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -401,7 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <i class="fas fa-phone me-2"></i> <?= htmlspecialchars($admin['phone'] ?? 'No phone number added') ?>
                             </p>
                             <p class="mb-0">
-                                <i class="fas fa-calendar-alt me-2"></i> Admin since <?= date('F Y', strtotime($admin['created_at'])) ?>
+                                <i class="fas fa-calendar-alt me-2"></i> Admin since <?= htmlspecialchars(reclaimFormatDate($admin['created_at'] ?? null, 'F Y')) ?>
                             </p>
                         </div>
                     </div>
@@ -530,7 +531,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </div>
                                 <div class="info-row">
                                     <div class="info-label">Joined Date</div>
-                                    <div class="info-value"><?= date('F d, Y', strtotime($admin['created_at'])) ?></div>
+                                    <div class="info-value"><?= htmlspecialchars(reclaimFormatDate($admin['created_at'] ?? null, 'F d, Y')) ?></div>
                                 </div>
                                 <?php if($admin['last_login']): ?>
                                 <div class="info-row">

@@ -155,6 +155,64 @@ function timeAgo($timestamp) {
 }
 
 /**
+ * Check whether a database table contains a specific column.
+ */
+function reclaimTableColumnExists(PDO $db, $tableName, $columnName) {
+    static $columnsByConnection = [];
+
+    $tableName = strtolower(trim((string) $tableName));
+    $columnName = strtolower(trim((string) $columnName));
+
+    if ($tableName === '' || $columnName === '') {
+        return false;
+    }
+
+    if (!preg_match('/^[a-z0-9_]+$/', $tableName) || !preg_match('/^[a-z0-9_]+$/', $columnName)) {
+        return false;
+    }
+
+    $cacheKey = spl_object_id($db) . ':' . $tableName;
+
+    if (!isset($columnsByConnection[$cacheKey])) {
+        $columnsByConnection[$cacheKey] = [];
+
+        try {
+            $statement = $db->query('SHOW COLUMNS FROM `' . $tableName . '`');
+            $columns = $statement ? $statement->fetchAll(PDO::FETCH_ASSOC) : [];
+
+            foreach ($columns as $column) {
+                $fieldName = strtolower((string) ($column['Field'] ?? ''));
+                if ($fieldName !== '') {
+                    $columnsByConnection[$cacheKey][$fieldName] = true;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('Unable to inspect table schema for ' . $tableName . ': ' . $e->getMessage());
+            $columnsByConnection[$cacheKey] = [];
+        }
+    }
+
+    return isset($columnsByConnection[$cacheKey][$columnName]);
+}
+
+/**
+ * Format an optional datetime value and fall back gracefully when missing.
+ */
+function reclaimFormatDate($value, $format = 'M d, Y', $fallback = 'Not available') {
+    $value = trim((string) $value);
+    if ($value === '') {
+        return $fallback;
+    }
+
+    $timestamp = strtotime($value);
+    if ($timestamp === false || $timestamp <= 0) {
+        return $fallback;
+    }
+
+    return date($format, $timestamp);
+}
+
+/**
  * Normalize an image-derived search label into a lowercase keyword.
  */
 function normalizeImageSearchLabel($label) {

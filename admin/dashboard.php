@@ -1,51 +1,70 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/functions.php';
 requireAdmin();
 
 $db = Database::getInstance()->getConnection();
+$stats = [
+    'total_users' => 0,
+    'total_items' => 0,
+    'pending_claims' => 0,
+    'completed_claims' => 0,
+    'rejected_claims' => 0,
+];
+$pending_claims = [];
+$recent_items = [];
+$recent_users = [];
+$page_load_error = '';
 
-// Get comprehensive statistics
-$stats = [];
-$stats['total_users'] = $db->query("SELECT COUNT(*) FROM users WHERE role != 'admin'")->fetchColumn();
-$stats['total_items'] = $db->query("SELECT COUNT(*) FROM items")->fetchColumn();
-$stats['pending_claims'] = $db->query("SELECT COUNT(*) FROM claim_requests WHERE status = 'pending'")->fetchColumn();
-$stats['completed_claims'] = $db->query("SELECT COUNT(*) FROM claim_requests WHERE status = 'approved'")->fetchColumn();
-$stats['rejected_claims'] = $db->query("SELECT COUNT(*) FROM claim_requests WHERE status = 'rejected'")->fetchColumn();
+try {
+    $usersHasCreatedAt = reclaimTableColumnExists($db, 'users', 'created_at');
+    $recentUsersOrderBy = $usersHasCreatedAt ? 'created_at DESC, user_id DESC' : 'user_id DESC';
 
-// Get recent claims
-$stmt = $db->prepare("
-    SELECT c.*, i.title as item_title, i.description as item_description, u.name as claimant_name, u.email as claimant_email
-    FROM claim_requests c
-    JOIN items i ON c.item_id = i.item_id
-    JOIN users u ON c.claimant_id = u.user_id
-    WHERE c.status = 'pending'
-    ORDER BY c.created_at DESC
-    LIMIT 10
-");
-$stmt->execute();
-$pending_claims = $stmt->fetchAll();
+    // Get comprehensive statistics
+    $stats['total_users'] = $db->query("SELECT COUNT(*) FROM users WHERE role != 'admin'")->fetchColumn();
+    $stats['total_items'] = $db->query("SELECT COUNT(*) FROM items")->fetchColumn();
+    $stats['pending_claims'] = $db->query("SELECT COUNT(*) FROM claim_requests WHERE status = 'pending'")->fetchColumn();
+    $stats['completed_claims'] = $db->query("SELECT COUNT(*) FROM claim_requests WHERE status = 'approved'")->fetchColumn();
+    $stats['rejected_claims'] = $db->query("SELECT COUNT(*) FROM claim_requests WHERE status = 'rejected'")->fetchColumn();
 
-// Get recent items
-$stmt = $db->prepare("
-    SELECT i.*, u.name as reporter_name
-    FROM items i
-    JOIN users u ON i.reported_by = u.user_id
-    ORDER BY i.reported_date DESC
-    LIMIT 5
-");
-$stmt->execute();
-$recent_items = $stmt->fetchAll();
+    // Get recent claims
+    $stmt = $db->prepare("
+        SELECT c.*, i.title as item_title, i.description as item_description, u.name as claimant_name, u.email as claimant_email
+        FROM claim_requests c
+        JOIN items i ON c.item_id = i.item_id
+        JOIN users u ON c.claimant_id = u.user_id
+        WHERE c.status = 'pending'
+        ORDER BY c.created_at DESC
+        LIMIT 10
+    ");
+    $stmt->execute();
+    $pending_claims = $stmt->fetchAll();
 
-// Get recent users
-$stmt = $db->prepare("
-    SELECT * FROM users 
-    WHERE role != 'admin' 
-    ORDER BY created_at DESC 
-    LIMIT 5
-");
-$stmt->execute();
-$recent_users = $stmt->fetchAll();
+    // Get recent items
+    $stmt = $db->prepare("
+        SELECT i.*, u.name as reporter_name
+        FROM items i
+        JOIN users u ON i.reported_by = u.user_id
+        ORDER BY i.reported_date DESC
+        LIMIT 5
+    ");
+    $stmt->execute();
+    $recent_items = $stmt->fetchAll();
+
+    // Get recent users
+    $stmt = $db->prepare("
+        SELECT * FROM users 
+        WHERE role != 'admin' 
+        ORDER BY {$recentUsersOrderBy}
+        LIMIT 5
+    ");
+    $stmt->execute();
+    $recent_users = $stmt->fetchAll();
+} catch (PDOException $e) {
+    error_log('Admin dashboard data load failed: ' . $e->getMessage());
+    $page_load_error = 'Some dashboard data could not be loaded right now.';
+}
 
 $base_url = app_base_path();
 ?>
@@ -231,10 +250,16 @@ $base_url = app_base_path();
 <body class="app-page admin-page">
     <div class="container-fluid">
         <div class="row">
-            <?php include 'sidebar.php'; ?>
+            <?php include __DIR__ . '/sidebar.php'; ?>
             
             <!-- Main Content -->
             <div class="col-md-10 main-content content-wrapper">
+                <?php if($page_load_error): ?>
+                    <div class="alert alert-warning" role="alert">
+                        <i class="fas fa-exclamation-triangle me-2"></i><?= htmlspecialchars($page_load_error) ?>
+                    </div>
+                <?php endif; ?>
+
                 <!-- Welcome Banner -->
                 <div class="welcome-banner">
                     <div class="d-flex justify-content-between align-items-center">
