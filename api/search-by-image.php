@@ -1241,6 +1241,17 @@ function applyInferredObjectFamiliesToResults(array $results, array $uploadedObj
 function calculateVisualSimilarity(string $imageOne, string $imageTwo, array $pythonCommand): array
 {
     $defaultMetrics = createEmptyImageMetrics();
+
+    // Try remote OpenCV microservice first if configured
+    $serviceUrl = trim((string) EnvLoader::get('OPENCV_SERVICE_URL', ''));
+    if ($serviceUrl !== '') {
+        $result = calculateVisualSimilarityRemote($imageOne, $imageTwo, $serviceUrl);
+        if ($result !== null) {
+            return $result;
+        }
+    }
+
+    // Fall back to local Python if available
     $scriptPath = __DIR__ . '/compare.py';
 
     if (!is_file($scriptPath) || !is_file($imageOne) || !is_file($imageTwo)) {
@@ -1269,6 +1280,79 @@ function calculateVisualSimilarity(string $imageOne, string $imageTwo, array $py
         'orb_score' => clampPercent((float) ($payload['orb_score'] ?? 0)),
         'histogram_score' => clampPercent((float) ($payload['histogram_score'] ?? ($payload['hist_score'] ?? 0))),
         'shape_score' => clampPercent((float) ($payload['shape_score'] ?? 0)),
+        'verified_matches' => max(0, (int) ($payload['verified_matches'] ?? 0)),
+        'keypoints_image1' => max(0, (int) ($payload['keypoints_image1'] ?? ($payload['features1'] ?? 0))),
+        'keypoints_image2' => max(0, (int) ($payload['keypoints_image2'] ?? ($payload['features2'] ?? 0))),
+    ];
+}
+
+function calculateVisualSimilarityRemote(string $imageOne, string $imageTwo, string $serviceUrl): ?array
+{
+    if (!function_exists('curl_init')) {
+        return null;
+    }
+
+    $appUrl = rtrim((string) EnvLoader::get('APP_URL', ''), '/');
+    if ($appUrl === '') {
+        return null;
+    }
+
+    $toPublicUrl = static function (string $absPath) use ($appUrl): ?string {
+        $root = realpath(__DIR__ . '/..');
+        if ($root === false) {
+            return null;
+        }
+        $rel = str_replace('\\', '/', substr($absPath, strlen($root)));
+        return $appUrl . '/' . ltrim($rel, '/');
+    };
+
+    $url1 = $toPublicUrl($imageOne);
+    $url2 = $toPublicUrl($imageTwo);
+    if ($url1 === null || $url2 === null) {
+        return null;
+    }
+
+    $apiKey = trim((string) EnvLoader::get('OPENCV_SERVICE_API_KEY', ''));
+    $endpoint = rtrim($serviceUrl, '/') . '/compare';
+
+    $ch = curl_init($endpoint);
+    $headers = ['Content-Type: multipart/form-data'];
+    if ($apiKey !== '') {
+        $headers[] = 'X-API-Key: ' . $apiKey;
+    }
+
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => ['image1_url' => $url1, 'image2_url' => $url2],
+        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_NOSIGNAL       => true,
+    ]);
+
+    $raw = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($raw === false || $httpCode < 200 || $httpCode >= 300) {
+        error_log('OpenCV service error: ' . ($curlError ?: "HTTP $httpCode"));
+        return null;
+    }
+
+    $payload = json_decode($raw, true);
+    if (!is_array($payload) || !empty($payload['error'])) {
+        error_log('OpenCV service returned error: ' . ($payload['error'] ?? 'invalid response'));
+        return null;
+    }
+
+    return [
+        'similarity'       => clampPercent((float) ($payload['similarity'] ?? 0)),
+        'orb_score'        => clampPercent((float) ($payload['orb_score'] ?? 0)),
+        'histogram_score'  => clampPercent((float) ($payload['histogram_score'] ?? ($payload['hist_score'] ?? 0))),
+        'shape_score'      => clampPercent((float) ($payload['shape_score'] ?? 0)),
         'verified_matches' => max(0, (int) ($payload['verified_matches'] ?? 0)),
         'keypoints_image1' => max(0, (int) ($payload['keypoints_image1'] ?? ($payload['features1'] ?? 0))),
         'keypoints_image2' => max(0, (int) ($payload['keypoints_image2'] ?? ($payload['features2'] ?? 0))),
