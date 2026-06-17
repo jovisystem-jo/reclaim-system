@@ -6,6 +6,12 @@ if (file_exists(__DIR__ . '/env.php')) {
 
 configureErrorHandling();
 
+// Timezone — default to Malaysia Time (UTC+8); override via APP_TIMEZONE in .env
+$appTimezone = getenv('APP_TIMEZONE') ?: 'Asia/Kuala_Lumpur';
+if (@date_default_timezone_set($appTimezone) === false) {
+    date_default_timezone_set('Asia/Kuala_Lumpur');
+}
+
 // Database configuration
 $dbHost = getenv('DB_HOST') ?: 'localhost';
 $dbPort = getenv('DB_PORT') ?: '3306';
@@ -35,6 +41,13 @@ class Database {
                     PDO::ATTR_EMULATE_PREPARES => false
                 ]
             );
+
+            // Sync MySQL session timezone with PHP
+            $offset = (new DateTimeZone(date_default_timezone_get()))->getOffset(new DateTime('now', new DateTimeZone('UTC')));
+            $sign   = $offset >= 0 ? '+' : '-';
+            $abs    = abs($offset);
+            $tzStr  = sprintf("%s%02d:%02d", $sign, intdiv($abs, 3600), ($abs % 3600) / 60);
+            $this->connection->exec("SET time_zone = '{$tzStr}'"  );
         } catch(PDOException $e) {
             // Log the real error, but do not expose database details to users.
             error_log("Database connection failed: " . $e->getMessage());

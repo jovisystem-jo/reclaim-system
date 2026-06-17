@@ -370,10 +370,12 @@ def calculate_orb_score(
         + (balance_score * 0.05)
     )
 
-    if verified_matches < 6:
-        orb_score = min(orb_score, 40.0)
+    if verified_matches < 4:
+        orb_score = min(orb_score, 35.0)
+    elif verified_matches < 6:
+        orb_score = min(orb_score, 52.0)
     elif verified_matches < 8:
-        orb_score = min(orb_score, 58.0)
+        orb_score = min(orb_score, 68.0)
 
     return clamp_score(orb_score), verified_matches
 
@@ -655,16 +657,22 @@ def apply_similarity_adjustments(
     """Apply penalties/boosts so high scores require agreement across signals."""
     similarity = float(base_similarity)
 
-    if histogram_score < 30.0 and shape_score >= 70.0 and orb_score < 50.0:
-        similarity *= 0.72
-    elif histogram_score < 35.0 and orb_score < 50.0:
+    # Penalise only when two signals clearly disagree; real-world photos can
+    # have lighting differences that make one signal weaker than expected.
+    if histogram_score < 25.0 and shape_score >= 70.0 and orb_score < 45.0:
         similarity *= 0.78
+    elif histogram_score < 30.0 and orb_score < 40.0:
+        similarity *= 0.84
 
-    if shape_score < 25.0 and orb_score < 35.0:
-        similarity *= 0.82
-
-    if verified_matches < 6 and orb_score < 35.0:
+    if shape_score < 20.0 and orb_score < 30.0:
         similarity *= 0.85
+
+    if verified_matches < 4 and orb_score < 30.0:
+        similarity *= 0.88
+
+    # Boost when two or more signals agree strongly
+    if orb_score >= 55.0 and histogram_score >= 65.0 and shape_score >= 60.0 and verified_matches >= 6:
+        similarity = max(similarity, 72.0)
 
     if orb_score >= 65.0 and histogram_score >= 70.0 and shape_score >= 65.0 and verified_matches >= 8:
         similarity = max(similarity, 80.0)

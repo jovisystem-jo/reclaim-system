@@ -453,19 +453,24 @@ function getMatchLevel($score) {
 
 function calculateStoredDisplaySimilarityScore(array $match): float
 {
-    $imageScore    = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
     $finalScore    = (float) ($match['final_score'] ?? 0);
+    $imageScore    = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
     $imaggaScore   = (float) ($match['imagga_score'] ?? 0);
     $jaccardScore  = (float) ($match['jaccard_score'] ?? 0);
     $categoryScore = (float) ($match['category_score'] ?? 0);
 
-    // When OpenCV is unavailable, derive display score from semantic signals
-    if ($imageScore < 5.0) {
-        $semanticScore = ($imaggaScore * 0.55) + ($jaccardScore * 0.30) + ($categoryScore * 0.15);
-        return max(0.0, min(100.0, max($semanticScore, $finalScore)));
+    // Use final_score when it was properly computed
+    if ($finalScore >= 1.0) {
+        return max(0.0, min(100.0, $finalScore));
     }
 
-    return max(0.0, min(100.0, max($imageScore, ($finalScore * 0.85) + ($imageScore * 0.15))));
+    // Fall back to deriving a score from available signals
+    if ($imageScore >= 5.0) {
+        return max(0.0, min(100.0, $imageScore));
+    }
+
+    $semanticScore = ($imaggaScore * 0.55) + ($jaccardScore * 0.30) + ($categoryScore * 0.15);
+    return max(0.0, min(100.0, $semanticScore));
 }
 
 function calculateRelatedCategoryScore(array $referenceMatch, array $candidateItem): float
