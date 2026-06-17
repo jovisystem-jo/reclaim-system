@@ -11,23 +11,29 @@ $base_url = app_base_path();
 $unread_count = 0;
 $unreadNotifications = [];
 if (isset($_SESSION['userID'])) {
-    require_once __DIR__ . '/../config/database.php';
-    $db = Database::getInstance()->getConnection();
-    
-    // Get unread count
-    $stmt = $db->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
-    $stmt->execute([$_SESSION['userID']]);
-    $unread_count = $stmt->fetchColumn();
-    
-    // Get ONLY LATEST 2 UNREAD notifications
-    $stmt = $db->prepare("
-        SELECT * FROM notifications 
-        WHERE user_id = ? AND is_read = 0
-        ORDER BY created_at DESC 
-        LIMIT 2
-    ");
-    $stmt->execute([$_SESSION['userID']]);
-    $unreadNotifications = $stmt->fetchAll();
+    try {
+        require_once __DIR__ . '/../config/database.php';
+        $db = Database::getInstance()->getConnection();
+        
+        // Keep the shared header resilient so page-specific errors do not turn into full-page 500s.
+        $stmt = $db->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
+        $stmt->execute([$_SESSION['userID']]);
+        $unread_count = $stmt->fetchColumn();
+        
+        // Get ONLY LATEST 2 UNREAD notifications
+        $stmt = $db->prepare("
+            SELECT * FROM notifications 
+            WHERE user_id = ? AND is_read = 0
+            ORDER BY created_at DESC 
+            LIMIT 2
+        ");
+        $stmt->execute([$_SESSION['userID']]);
+        $unreadNotifications = $stmt->fetchAll();
+    } catch (Throwable $e) {
+        error_log('Header notification preload failed: ' . $e->getMessage());
+        $unread_count = 0;
+        $unreadNotifications = [];
+    }
 }
 
 // Helper function for time ago

@@ -228,6 +228,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (PDOException $e) {
             error_log("Report item database error: " . $e->getMessage());
             $error = 'Unable to save item. Please try again.';
+        } catch (Throwable $e) {
+            error_log("Report item unexpected error: " . $e->getMessage());
+            $error = 'Something went wrong while reporting the item. Please try again.';
         }
     }
 }
