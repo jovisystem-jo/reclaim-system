@@ -70,6 +70,53 @@ class MailConfig
         return $value === false ? $default : $value;
     }
 
+    private static function getEnvAnyValue(array $names, $default = '')
+    {
+        foreach ($names as $name) {
+            $value = self::getEnvValue($name, null);
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        }
+
+        return $default;
+    }
+
+    private static function getEnvAnyBoolean(array $names, $default = false)
+    {
+        foreach ($names as $name) {
+            $value = self::getEnvValue($name, null);
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            $normalized = strtolower(trim((string) $value));
+            if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+                return true;
+            }
+
+            if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+                return false;
+            }
+        }
+
+        return $default;
+    }
+
+    private static function getEnvAnyInt(array $names, $default)
+    {
+        foreach ($names as $name) {
+            $value = self::getEnvValue($name, null);
+            if ($value === null || $value === '' || !is_numeric($value)) {
+                continue;
+            }
+
+            return (int) $value;
+        }
+
+        return $default;
+    }
+
     private static function getEnvBoolean($name, $default = false)
     {
         $value = self::getEnvValue($name, null);
@@ -106,8 +153,8 @@ class MailConfig
             return self::normalizeMailer($configured);
         }
 
-        $smtpHost = trim((string) self::getEnvValue('SMTP_HOST', ''));
-        $smtpUsername = trim((string) self::getEnvValue('SMTP_USERNAME', ''));
+        $smtpHost = trim((string) self::getEnvAnyValue(['SMTP_HOST', 'MAIL_HOST'], ''));
+        $smtpUsername = trim((string) self::getEnvAnyValue(['SMTP_USERNAME', 'MAIL_USERNAME'], ''));
         if ($smtpHost !== '' || $smtpUsername !== '') {
             return 'smtp';
         }
@@ -299,7 +346,7 @@ class MailConfig
 
     private static function resolveSmtpTimeout($defaultTimeout)
     {
-        $timeout = self::getEnvInt('SMTP_TIMEOUT', $defaultTimeout);
+        $timeout = self::getEnvAnyInt(['SMTP_TIMEOUT', 'MAIL_TIMEOUT'], $defaultTimeout);
         if ($timeout <= 0) {
             $timeout = $defaultTimeout;
         }
@@ -332,25 +379,25 @@ class MailConfig
 
     private static function buildBaseSmtpProfile()
     {
-        $host = trim((string) self::getEnvValue('SMTP_HOST', 'smtp.gmail.com'));
+        $host = trim((string) self::getEnvAnyValue(['SMTP_HOST', 'MAIL_HOST'], 'smtp.gmail.com'));
         $encryption = self::normalizeEncryption(
-            self::getEnvValue('SMTP_ENCRYPTION', self::getEnvValue('SMTP_SECURE', 'tls'))
+            self::getEnvAnyValue(['SMTP_ENCRYPTION', 'MAIL_ENCRYPTION', 'SMTP_SECURE'], 'tls')
         );
-        $port = self::getEnvInt(
-            'SMTP_PORT',
+        $port = self::getEnvAnyInt(
+            ['SMTP_PORT', 'MAIL_PORT'],
             $encryption === PHPMailer::ENCRYPTION_SMTPS ? 465 : 587
         );
 
         return [
             'host' => $host,
-            'auth' => self::getEnvBoolean('SMTP_AUTH', true),
-            'username' => trim((string) self::getEnvValue('SMTP_USERNAME', '')),
-            'password' => self::normalizeSmtpPassword(self::getEnvValue('SMTP_PASSWORD', '')),
+            'auth' => self::getEnvAnyBoolean(['SMTP_AUTH', 'MAIL_AUTH'], true),
+            'username' => trim((string) self::getEnvAnyValue(['SMTP_USERNAME', 'MAIL_USERNAME'], '')),
+            'password' => self::normalizeSmtpPassword(self::getEnvAnyValue(['SMTP_PASSWORD', 'MAIL_PASSWORD'], '')),
             'encryption' => $encryption,
             'port' => $port,
-            'auto_tls' => self::getEnvBoolean('SMTP_AUTO_TLS', $encryption !== ''),
-            'allow_self_signed' => self::getEnvBoolean('SMTP_ALLOW_SELF_SIGNED', false),
-            'helo' => trim((string) self::getEnvValue('SMTP_HELO_DOMAIN', '')),
+            'auto_tls' => self::getEnvAnyBoolean(['SMTP_AUTO_TLS', 'MAIL_AUTO_TLS'], $encryption !== ''),
+            'allow_self_signed' => self::getEnvAnyBoolean(['SMTP_ALLOW_SELF_SIGNED', 'MAIL_ALLOW_SELF_SIGNED'], false),
+            'helo' => trim((string) self::getEnvAnyValue(['SMTP_HELO_DOMAIN', 'MAIL_HELO_DOMAIN'], '')),
             'timeout' => self::resolveSmtpTimeout(self::isProductionEnvironment() ? 8 : 30),
         ];
     }
@@ -402,7 +449,21 @@ class MailConfig
 
     private static function buildDefaultFromEmail($smtpUsername = '', $transport = 'smtp')
     {
-        $configured = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', self::getEnvValue('SMTP_FROM_EMAIL', '')));
+        $configured = trim((string) self::getEnvAnyValue(['MAIL_FROM_EMAIL', 'SMTP_FROM_EMAIL'], ''));
+        $smtpHost = self::getEnvAnyValue(['SMTP_HOST', 'MAIL_HOST'], 'smtp.gmail.com');
+        $allowCustomGmailFrom = self::getEnvBoolean('MAIL_ALLOW_CUSTOM_FROM_ON_GMAIL', false);
+
+        if (
+            $transport === 'smtp'
+            && self::isGmailSmtpHost($smtpHost)
+            && self::isValidMailbox($smtpUsername)
+            && !$allowCustomGmailFrom
+        ) {
+            if (!self::isValidMailbox($configured) || strcasecmp($configured, $smtpUsername) !== 0) {
+                return $smtpUsername;
+            }
+        }
+
         if (self::isValidMailbox($configured)) {
             return $configured;
         }
@@ -469,21 +530,23 @@ class MailConfig
     private static function resolveHostnameIdentity()
     {
         $configuredHostname = trim((string) self::getEnvValue('MAIL_HOSTNAME', ''));
-        $configuredHelo = trim((string) self::getEnvValue('SMTP_HELO_DOMAIN', ''));
+        $configuredHelo = trim((string) self::getEnvAnyValue(['SMTP_HELO_DOMAIN', 'MAIL_HELO_DOMAIN'], ''));
         $appUrl = trim((string) self::getEnvValue('APP_URL', ''));
         $serverName = trim((string) ($_SERVER['SERVER_NAME'] ?? ''));
         $httpHost = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
         $serverAddress = trim((string) ($_SERVER['SERVER_ADDR'] ?? ''));
         $systemHostname = function_exists('gethostname') ? (string) gethostname() : '';
+        $detectedAppHost = self::detectAppHost();
 
         $candidates = [
             $configuredHostname,
             $configuredHelo,
             parse_url($appUrl, PHP_URL_HOST) ?: '',
+            $detectedAppHost,
             $httpHost,
             $serverName,
-            $serverAddress,
             $systemHostname,
+            $serverAddress,
         ];
 
         foreach ($candidates as $candidate) {
@@ -498,11 +561,20 @@ class MailConfig
         return self::$lastResolvedHostname;
     }
 
-    private static function buildReturnPathEmail($fromEmail)
+    private static function buildReturnPathEmail($fromEmail, $smtpUsername = '', $transport = 'smtp')
     {
         $configured = trim((string) self::getEnvValue('MAIL_RETURN_PATH_EMAIL', ''));
         if (self::isValidMailbox($configured)) {
             return $configured;
+        }
+
+        $smtpHost = self::getEnvAnyValue(['SMTP_HOST', 'MAIL_HOST'], 'smtp.gmail.com');
+        if (
+            $transport === 'smtp'
+            && self::isGmailSmtpHost($smtpHost)
+            && self::isValidMailbox($smtpUsername)
+        ) {
+            return $smtpUsername;
         }
 
         if (self::isValidMailbox($fromEmail)) {
@@ -520,6 +592,37 @@ class MailConfig
     private static function buildHostname()
     {
         return self::resolveHostnameIdentity();
+    }
+
+    private static function validateSmtpProfile(array $smtpProfile)
+    {
+        $issues = [];
+
+        if (trim((string) ($smtpProfile['host'] ?? '')) === '') {
+            $issues[] = 'SMTP host is not configured. Set SMTP_HOST or MAIL_HOST.';
+        }
+
+        if (!empty($smtpProfile['auth'])) {
+            if (trim((string) ($smtpProfile['username'] ?? '')) === '') {
+                $issues[] = 'SMTP username is not configured. Set SMTP_USERNAME or MAIL_USERNAME.';
+            }
+
+            if (trim((string) ($smtpProfile['password'] ?? '')) === '') {
+                $issues[] = 'SMTP password is not configured. Set SMTP_PASSWORD or MAIL_PASSWORD.';
+            }
+        }
+
+        $port = (int) ($smtpProfile['port'] ?? 0);
+        if ($port <= 0) {
+            $issues[] = 'SMTP port is not configured correctly.';
+        }
+
+        return implode(' ', $issues);
+    }
+
+    private static function shouldLogSuccessfulDelivery()
+    {
+        return self::getEnvBoolean('MAIL_LOG_SUCCESS', false);
     }
 
     private static function configureDebugOutput($mailer)
@@ -618,7 +721,7 @@ class MailConfig
 
         $mailer->setFrom($fromEmail, $fromName);
 
-        $returnPath = self::buildReturnPathEmail($fromEmail);
+        $returnPath = self::buildReturnPathEmail($fromEmail, $smtpUsername, $transport);
         if ($returnPath !== '') {
             $mailer->Sender = $returnPath;
         }
@@ -659,6 +762,14 @@ class MailConfig
                     continue;
                 }
 
+                if ($mail->Mailer === 'smtp') {
+                    $profileError = self::validateSmtpProfile($smtpProfile ?: []);
+                    if ($profileError !== '') {
+                        $attemptErrors[] = $attemptLabel . ': ' . $profileError;
+                        continue;
+                    }
+                }
+
                 if ($mail->Mailer === 'smtp' && $mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {
                     $profileError = 'SMTP credentials are not configured.';
                     $attemptErrors[] = $attemptLabel . ': ' . $profileError;
@@ -676,6 +787,13 @@ class MailConfig
                 $sent = $mail->send();
                 if ($sent) {
                     self::$lastTransport = $transport === 'smtp' ? $attemptLabel : $transport;
+                    if (self::shouldLogSuccessfulDelivery()) {
+                        self::logDiagnostic(
+                            'Email sent to ' . $to
+                            . ' via ' . self::$lastTransport
+                            . (self::$lastResolvedHostname !== '' ? ' using HELO/hostname ' . self::$lastResolvedHostname : '')
+                        );
+                    }
                     return true;
                 }
 
@@ -824,6 +942,13 @@ class MailConfig
             if ($mail->Mailer !== 'smtp') {
                 self::$lastTransport = $testTransport;
                 return true;
+            }
+
+            $profile = self::buildBaseSmtpProfile();
+            $profileError = self::validateSmtpProfile($profile);
+            if ($profileError !== '') {
+                self::$lastError = $profileError;
+                return false;
             }
 
             if ($mail->SMTPAuth && (empty($mail->Username) || empty($mail->Password))) {

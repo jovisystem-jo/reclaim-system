@@ -38,6 +38,7 @@ if ($configuredMailer !== 'preview') {
         fwrite(STDOUT, "SMTP port: {$mailer->Port}\n");
         fwrite(STDOUT, "SMTP auth: " . ($mailer->SMTPAuth ? 'on' : 'off') . "\n");
         fwrite(STDOUT, "SMTP user: {$mailer->Username}\n");
+        fwrite(STDOUT, "SMTP hostname/HELO: " . ($mailer->Hostname !== '' ? $mailer->Hostname : 'not set') . "\n");
     }
 } else {
     fwrite(STDOUT, "Preview mailbox: dev-mailbox.php\n");
@@ -58,6 +59,8 @@ if (MailConfig::sendNotification($recipient, $subject, $body)) {
         fwrite(STDOUT, "Mail captured locally as preview " . MailConfig::getLastPreviewId() . "\n");
     } else {
         fwrite(STDOUT, "Mail sent successfully to {$recipient}\n");
+        fwrite(STDOUT, "Transport used: " . MailConfig::getLastTransport() . "\n");
+        fwrite(STDOUT, "Resolved hostname: " . MailConfig::getLastResolvedHostname() . "\n");
     }
     exit(0);
 }

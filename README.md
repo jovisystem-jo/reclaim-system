@@ -222,12 +222,27 @@ buildConfigField "String", "API_BASE_URL", "\"http://192.168.1.20/reclaim-system
 3. Confirm database credentials in `config/database.php`
 4. Confirm SMTP settings in `.env` / environment variables:
    - `MAIL_MAILER` set to `preview` for localhost development or `smtp` for real email delivery
-   - `SMTP_USERNAME`
-   - `SMTP_PASSWORD`
+   - `SMTP_USERNAME` or `MAIL_USERNAME`
+   - `SMTP_PASSWORD` or `MAIL_PASSWORD`
+   - optional `SMTP_HOST` or `MAIL_HOST`
+   - optional `SMTP_PORT` or `MAIL_PORT`
+   - optional `SMTP_ENCRYPTION` or `MAIL_ENCRYPTION`
    - optional `MAIL_FROM_EMAIL`
    - optional `MAIL_FROM_NAME`
+   - optional `MAIL_HOSTNAME` or `SMTP_HELO_DOMAIN` for live hosting
 5. Open the site:
    - `http://localhost/reclaim-system/`
+
+### Production Mail Checklist
+
+- `.cpanel.yml` intentionally excludes `.env` from deployment, so create or upload the live `.env` file manually on the server.
+- Run `composer install --no-dev --optimize-autoloader` on the server if `vendor/` is missing.
+- For Gmail SMTP, use an App Password generated from the Gmail account that sends the mail.
+- Keep `MAIL_FROM_EMAIL` the same as the authenticated Gmail address unless that Gmail account already has the sender configured as a Gmail alias.
+- If you do use a Gmail alias intentionally, set `MAIL_ALLOW_CUSTOM_FROM_ON_GMAIL=true`.
+- Set `APP_URL` and preferably `MAIL_HOSTNAME` or `SMTP_HELO_DOMAIN` to your real live domain so SMTP uses a stable hostname identity.
+- Use `php scripts/test_mail.php you@example.com` on the server to verify live delivery.
+- Check `storage/logs/mail.log` for mail transport failures and diagnostics.
 
 The mobile token table is created automatically when a mobile API route is used.
 

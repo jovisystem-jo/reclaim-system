@@ -1,3 +1,15 @@
 [2026-06-17 09:45:19] Email failed to shamsulhjr04@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP credentials are not configured. | smtp.gmail.com:465/ssl: SMTP credentials are not configured.
 [2026-06-17 09:46:00] Email failed to jodyadilla442@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP credentials are not configured. | smtp.gmail.com:465/ssl: SMTP credentials are not configured.
 [2026-06-17 09:46:08] Email failed to jodyadilla442@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP credentials are not configured. | smtp.gmail.com:465/ssl: SMTP credentials are not configured.
+[2026-06-17 10:16:08] Mail attempt failed via smtp.gmail.com:587/tls for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 10:16:10] Mail attempt failed via smtp.gmail.com:465/ssl for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 10:16:10] Email failed to jodyadilla442@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP Error: Could not authenticate. | smtp.gmail.com:465/ssl: SMTP Error: Could not authenticate.
+[2026-06-17 10:19:32] Mail attempt failed via smtp.gmail.com:587/tls for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 10:19:37] Mail attempt failed via smtp.gmail.com:465/ssl for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 10:19:37] Email failed to jodyadilla442@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP Error: Could not authenticate. | smtp.gmail.com:465/ssl: SMTP Error: Could not authenticate.
+[2026-06-17 11:55:11] Mail attempt failed via smtp.gmail.com:587/tls for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 11:55:13] Mail attempt failed via smtp.gmail.com:465/ssl for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 11:55:13] Email failed to jodyadilla442@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP Error: Could not authenticate. | smtp.gmail.com:465/ssl: SMTP Error: Could not authenticate.
+[2026-06-17 11:56:50] Mail attempt failed via smtp.gmail.com:587/tls for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 11:56:53] Mail attempt failed via smtp.gmail.com:465/ssl for jodyadilla442@gmail.com: SMTP Error: Could not authenticate.
+[2026-06-17 11:56:53] Email failed to jodyadilla442@gmail.com: smtp: smtp.gmail.com:587/tls: SMTP Error: Could not authenticate. | smtp.gmail.com:465/ssl: SMTP Error: Could not authenticate.
