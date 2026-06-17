@@ -24,13 +24,13 @@ const IMAGGA_TOTAL_TIMEOUT_SECONDS = 8;
 const PYTHON_DISCOVERY_TIMEOUT_SECONDS = 2.0;
 const PYTHON_DEPENDENCY_TIMEOUT_SECONDS = 2.0;
 const PYTHON_COMPARE_TIMEOUT_SECONDS = 4.0;
-const IMAGE_WEIGHT = 0.70;
-const IMAGGA_WEIGHT = 0.15;
-const JACCARD_WEIGHT = 0.10;
-const CATEGORY_WEIGHT = 0.05;
-const HIGH_CONFIDENCE_IMAGE_THRESHOLD = 75.0;
-const HIGH_CONFIDENCE_IMAGGA_THRESHOLD = 70.0;
-const HIGH_CONFIDENCE_BOOST = 10.0;
+const IMAGE_WEIGHT = 0.60;
+const IMAGGA_WEIGHT = 0.20;
+const JACCARD_WEIGHT = 0.13;
+const CATEGORY_WEIGHT = 0.07;
+const HIGH_CONFIDENCE_IMAGE_THRESHOLD = 70.0;
+const HIGH_CONFIDENCE_IMAGGA_THRESHOLD = 65.0;
+const HIGH_CONFIDENCE_BOOST = 8.0;
 const MAX_RETURNED_MATCHES = 10;
 const MIN_MATCH_SCORE = 45.0;
 const MIN_DISPLAY_IMAGE_SCORE = 35.0;
@@ -199,10 +199,10 @@ try {
         $objectFamilyDetected = !empty($uploadedObjectFamilies);
         $sameObjectFamily = $objectFamilyDetected && hasCompatibleObjectFamily($uploadedObjectFamilies, $itemObjectFamilies);
 
-        // Strict object-family gate:
-        // If the uploaded image clearly detects a specific object type, never allow a different item type
-        // to pass just because OpenCV gives a moderate visual score or because of generic tags.
-        if (!empty($uploadedObjectFamilies) && !$sameObjectFamily) {
+        // Object-family gate: only skip items whose family is KNOWN and DIFFERENT.
+        // Items with no detectable family are kept — they may simply have vague titles
+        // or missing image_tags, but could still be the same physical object.
+        if (!empty($uploadedObjectFamilies) && !empty($itemObjectFamilies) && !$sameObjectFamily) {
             continue;
         }
 
@@ -708,13 +708,15 @@ function calculateJaccardSimilarity(array $uploadedTags, array $itemKeywords): f
     }
 
     $intersection = count(array_intersect_key($uploadedKeywordSet, $itemKeywordSet));
-    $union = count($uploadedKeywordSet + $itemKeywordSet);
-
-    if ($union === 0) {
+    if ($intersection === 0) {
         return 0.0;
     }
 
-    return clampPercent(($intersection / $union) * 100.0);
+    // Use Sørensen-Dice coefficient: 2*|A∩B| / (|A|+|B|)
+    // More sensitive than Jaccard (|A∩B|/|A∪B|) when sets are unequal in size —
+    // avoids penalising a large uploaded-tag vocabulary against a short item keyword list.
+    $dice = (2.0 * $intersection) / (count($uploadedKeywordSet) + count($itemKeywordSet));
+    return clampPercent($dice * 100.0);
 }
 
 function calculateCategoryScore($uploadedTags, $itemCategory): float
@@ -894,10 +896,10 @@ function calculateFinalScore(
             : 0.0
     );
 
-    if (!$hasModerateVisualSupport) {
+    // Only cap when visual score is clearly weak AND semantics are carrying it alone.
+    // Don't punish moderate visual scores (imageScore 40-60%) that are legitimate matches.
+    if (!$hasModerateVisualSupport && $imageScore < 35.0) {
         $finalScore = min($finalScore, max($imageScore, 55.0));
-    } elseif (!$hasStrongVisualSupport && $imageScore < 55.0) {
-        $finalScore = min($finalScore, max($imageScore, 59.0));
     }
 
     return clampPercent($finalScore);
@@ -911,9 +913,15 @@ function hasModerateDatabaseImageMatch(float $imageScore, array $imageMetrics): 
     $shapeScore = clampPercent((float) ($imageMetrics['shape_score'] ?? 0));
 
     return (
-        ($imageScore >= 35.0 && $verifiedMatches >= 5 && $orbScore >= 20.0 && $histogramScore >= 35.0)
+        // Any meaningful visual score with basic ORB confirmation
+        ($imageScore >= 45.0 && ($verifiedMatches >= 2 || $orbScore >= 15.0))
+        // ORB + color agree moderately
+        || ($imageScore >= 35.0 && $verifiedMatches >= 3 && $orbScore >= 15.0 && $histogramScore >= 30.0)
+        // Strong ORB with more verified keypoints
+        || ($imageScore >= 35.0 && $verifiedMatches >= 5 && $orbScore >= 20.0 && $histogramScore >= 35.0)
+        // Color + shape agree strongly (no ORB needed — lighting/angle difference)
+        || ($imageScore >= 38.0 && $histogramScore >= 50.0 && $shapeScore >= 55.0)
         || ($imageScore >= 45.0 && $histogramScore >= 55.0 && $shapeScore >= 60.0)
-        || ($imageScore >= 50.0 && $verifiedMatches >= 4 && $orbScore >= 25.0 && $histogramScore >= 30.0 && $shapeScore >= 65.0)
     );
 }
 
@@ -1019,41 +1027,57 @@ function isRelevantMatch(array $result): bool
     $hasStrongColorShapeAgreement = $imageScore >= 35.0 && $histogramScore >= 60.0 && $shapeScore >= 65.0;
 
     // --- Visual paths (OpenCV available) ---
+    // Strong visual match — no semantics needed
     if ($hasStrongVisualEvidence) {
         return true;
     }
 
-    if ($hasModerateVisualEvidence && $finalScore >= MIN_MATCH_SCORE) {
+    // OpenCV says clearly similar — trust it
+    if ($imageScore >= 55.0) {
+        return true;
+    }
+
+    // Moderate-to-good visual with any ORB or color confirmation
+    if ($imageScore >= 45.0 && ($verifiedMatches >= 2 || $orbScore >= 15.0 || $histogramScore >= 50.0)) {
+        return true;
+    }
+
+    if ($hasModerateVisualEvidence && $finalScore >= 40.0) {
         return true;
     }
 
     if ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement) {
-        return $finalScore >= MIN_MATCH_SCORE;
+        return $finalScore >= 40.0;
+    }
+
+    // Moderate visual combined with any semantic signal
+    if ($imageScore >= 35.0 && ($imaggaScore >= 25.0 || $jaccardScore >= 8.0 || $categoryScore >= 100.0)) {
+        return true;
     }
 
     // --- Semantic paths (tags, keywords, color, category, title, description) ---
     // Imagga tags strongly match item keywords/description
-    if ($imaggaScore >= 40.0 && ($jaccardScore >= 10.0 || $categoryScore >= 100.0 || count($matchedTags) >= 2)) {
+    if ($imaggaScore >= 35.0 && ($jaccardScore >= 8.0 || $categoryScore >= 100.0 || count($matchedTags) >= 2)) {
         return true;
     }
 
-    // Category confirmed + keyword overlap from title/description/tags
-    if ($categoryScore >= 100.0 && $jaccardScore >= 8.0) {
+    // Category confirmed + any keyword overlap
+    if ($categoryScore >= 100.0 && ($jaccardScore >= 6.0 || $imaggaScore >= 20.0)) {
         return true;
     }
 
     // Strong keyword overlap from title, description, tags
-    if ($jaccardScore >= 20.0) {
+    if ($jaccardScore >= 15.0) {
         return true;
     }
 
     // Same object type + any semantic signal (tag, keyword, or category)
-    if ($sameObjectFamily && ($imaggaScore >= 25.0 || $jaccardScore >= 8.0 || !empty($matchedTags))) {
+    if ($sameObjectFamily && ($imaggaScore >= 20.0 || $jaccardScore >= 6.0 || !empty($matchedTags))) {
         return true;
     }
 
-    // Good semantic score overall
-    if ($finalScore >= MIN_MATCH_SCORE && ($imaggaScore >= 25.0 || $jaccardScore >= 10.0)) {
+    // Any combination that gives a respectable final score with semantic backing
+    if ($finalScore >= 42.0 && ($imaggaScore >= 20.0 || $jaccardScore >= 8.0)) {
         return true;
     }
 
@@ -1154,41 +1178,33 @@ function calculateDisplayedSimilarityScore(
     $jaccardScore = clampPercent($jaccardScore);
     $categoryScore = clampPercent($categoryScore);
 
-    if ($finalScore <= 0.0) {
+    // finalScore is the authoritative combined score — use it directly.
+    if ($finalScore >= 1.0) {
+        return $finalScore;
+    }
+
+    // Fall back to visual score when no combined score was computed.
+    if ($imageScore >= 5.0) {
         return $imageScore;
     }
 
-    $displayScore = max(
-        $imageScore,
-        ($finalScore * 0.85) + ($imageScore * 0.15)
-    );
-
-    if (
-        $imageScore >= 65.0
-        && $imaggaScore >= 65.0
-        && ($jaccardScore >= 10.0 || $categoryScore >= 100.0)
-    ) {
-        $displayScore = max($displayScore, 80.0);
-    }
-
-    if ($imageScore >= 82.0 && $imaggaScore >= 72.0 && ($jaccardScore >= 15.0 || $categoryScore >= 100.0)) {
-        $displayScore = max($displayScore, 88.0);
-    }
-
-    return clampPercent($displayScore);
+    // Pure semantic fallback.
+    return clampPercent(($imaggaScore * 0.55) + ($jaccardScore * 0.30) + ($categoryScore * 0.15));
 }
 
 function sortImageSearchResults(array &$results): void
 {
     usort($results, static function (array $left, array $right): int {
-        $visualComparison = ($right['visual_score'] <=> $left['visual_score']);
-        if ($visualComparison !== 0) {
-            return $visualComparison;
-        }
-
+        // Sort by final_score first — it incorporates visual + semantic signals.
         $scoreComparison = ($right['final_score'] <=> $left['final_score']);
         if ($scoreComparison !== 0) {
             return $scoreComparison;
+        }
+
+        // Break ties using visual score, then imagga.
+        $visualComparison = ($right['visual_score'] <=> $left['visual_score']);
+        if ($visualComparison !== 0) {
+            return $visualComparison;
         }
 
         $imaggaComparison = ($right['imagga_score'] <=> $left['imagga_score']);
