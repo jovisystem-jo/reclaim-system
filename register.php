@@ -128,8 +128,9 @@ function clear_register_email_verification_data() {
 }
 
 function normalize_register_input(array $source) {
+    $rawName = trim($source['name'] ?? '');
     return [
-        'name' => trim($source['name'] ?? ''),
+        'name' => $rawName !== '' ? mb_convert_case(mb_strtolower($rawName, 'UTF-8'), MB_CASE_TITLE, 'UTF-8') : '',
         'email' => trim($source['email'] ?? ''),
         'username' => trim($source['username'] ?? ''),
         'password' => (string) ($source['password'] ?? ''),

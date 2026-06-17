@@ -99,7 +99,8 @@ if (isset($_GET['remove_photo']) && $_GET['remove_photo'] == 1) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     require_csrf_token();
 
-    $name = trim($_POST['name'] ?? '');
+    $rawName = trim($_POST['name'] ?? '');
+    $name = $rawName !== '' ? mb_convert_case(mb_strtolower($rawName, 'UTF-8'), MB_CASE_TITLE, 'UTF-8') : '';
     $phone = trim($_POST['phone'] ?? '');
     $department = trim($_POST['department'] ?? '');
     $student_staff_id = trim($_POST['student_staff_id'] ?? '');
@@ -511,7 +512,10 @@ function getProfileImageUrl($imagePath, $base_url) {
                     <?php endif; ?>
                 </div>
                 <div class="col-md-9">
-                    <h2 class="mb-2"><?= htmlspecialchars($user['name']) ?></h2>
+                    <h2 class="mb-1"><?= htmlspecialchars($user['name']) ?></h2>
+                    <p class="mb-2 text-white-50" style="font-size:0.9rem;">
+                        <i class="fas fa-at me-1"></i><?= htmlspecialchars($user['username'] ?? '') ?>
+                    </p>
                     <p class="mb-2">
                         <span class="badge-role">
                             <i class="fas <?= $user['role'] == 'student' ? 'fa-user-graduate' : ($user['role'] == 'staff' ? 'fa-chalkboard-teacher' : 'fa-shield-alt') ?>"></i>
@@ -649,12 +653,22 @@ function getProfileImageUrl($imagePath, $base_url) {
                             <?= csrf_field() ?>
                             <input type="hidden" name="update_profile" value="1">
                             <div class="row">
-                                <div class="col-md-12 mb-3">
+                                <div class="col-md-6 mb-3">
                                     <label class="form-label required-field">
                                         <i class="fas fa-user me-1 text-muted"></i> Full Name
                                     </label>
                                     <input type="text" name="name" class="form-control"
                                            value="<?= htmlspecialchars($user['name']) ?>" required>
+                                    <small class="text-muted">First letter of each word will be capitalised automatically.</small>
+                                </div>
+
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">
+                                        <i class="fas fa-at me-1 text-muted"></i> Username
+                                    </label>
+                                    <input type="text" class="form-control"
+                                           value="<?= htmlspecialchars($user['username'] ?? '') ?>" disabled>
+                                    <small class="text-muted">Username cannot be changed. Contact admin for assistance.</small>
                                 </div>
 
                                 <div class="col-md-6 mb-3">

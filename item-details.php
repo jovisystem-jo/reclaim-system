@@ -21,7 +21,7 @@ $db = Database::getInstance()->getConnection();
 
 // Get item details with reporter profile image
 $stmt = $db->prepare("
-    SELECT i.*, u.name as reporter_name, u.profile_image as reporter_profile_image, u.user_id as reporter_user_id
+    SELECT i.*, u.name as reporter_name, u.username as reporter_username, u.profile_image as reporter_profile_image, u.user_id as reporter_user_id
     FROM items i
     LEFT JOIN users u ON i.reported_by = u.user_id
     WHERE i.item_id = ?
@@ -132,8 +132,16 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
                             </div>
                         <?php endif; ?>
                         <div class="ms-3">
-                            <h6 class="mb-0"><?= htmlspecialchars($item['reporter_name'] ?? 'Anonymous') ?></h6>
-                            <small class="text-muted">Reporter ID: #<?= $item['reported_by'] ?></small>
+                            <h6 class="mb-0">
+                                <?php if (!empty($item['reporter_username'])): ?>
+                                    <i class="fas fa-at me-1" style="font-size:0.8em;color:#FF6B35;"></i><?= htmlspecialchars($item['reporter_username']) ?>
+                                <?php else: ?>
+                                    <?= htmlspecialchars($item['reporter_name'] ?? 'Anonymous') ?>
+                                <?php endif; ?>
+                            </h6>
+                            <?php if (!empty($item['reporter_username']) && !empty($item['reporter_name'])): ?>
+                                <small class="text-muted"><?= htmlspecialchars($item['reporter_name']) ?></small>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -471,7 +479,14 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
                                     <strong><?= formatDateTime($item['reported_date'] ?? $item['created_at']) ?></strong>
                                     <span class="text-muted">(<?= timeAgo($item['reported_date'] ?? $item['created_at']) ?>)</span>
                                 </p>
-                                <small class="text-muted">Reported by: <?= htmlspecialchars($item['reporter_name'] ?? 'Anonymous') ?></small>
+                                <small class="text-muted">Reported by:
+                                    <?php if (!empty($item['reporter_username'])): ?>
+                                        <i class="fas fa-at" style="font-size:0.8em;"></i><?= htmlspecialchars($item['reporter_username']) ?>
+                                        (<?= htmlspecialchars($item['reporter_name'] ?? '') ?>)
+                                    <?php else: ?>
+                                        <?= htmlspecialchars($item['reporter_name'] ?? 'Anonymous') ?>
+                                    <?php endif; ?>
+                                </small>
                             </div>
                         </div>
                         <?php if($claim_count > 0): ?>
