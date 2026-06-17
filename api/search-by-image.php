@@ -168,8 +168,9 @@ try {
     $informativeUploadedTags = filterInformativeUploadedTags($uploadedTags);
     $uploadedObjectFamilies = detectObjectFamiliesFromTags($informativeUploadedTags);
     $pythonCommand = findPythonCommand();
+    $opencvServiceUrl = trim((string) EnvLoader::get('OPENCV_SERVICE_URL', ''));
 
-    if ($pythonCommand === null) {
+    if ($pythonCommand === null && $opencvServiceUrl === '') {
         $warnings[] = canRunManagedSubprocesses()
             ? 'Python/OpenCV comparison is unavailable; image similarity scores were set to 0.'
             : 'Python/OpenCV comparison is disabled on this hosting environment because PHP cannot manage subprocess timeouts safely.';
@@ -210,10 +211,10 @@ try {
         $imageMetrics = createEmptyImageMetrics();
 
         if (
-            $pythonCommand !== null
+            ($pythonCommand !== null || $opencvServiceUrl !== '')
             && !hasExceededProcessingBudget($requestStartedAt, 3.0)
         ) {
-            $imageMetrics = calculateVisualSimilarity($uploadedImagePath, $itemImagePath, $pythonCommand);
+            $imageMetrics = calculateVisualSimilarity($uploadedImagePath, $itemImagePath, $pythonCommand ?? []);
         }
 
         $imageScore = round(clampPercent($imageMetrics['similarity'] ?? 0), 2);
