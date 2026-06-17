@@ -31,9 +31,9 @@ const CATEGORY_WEIGHT = 0.05;
 const HIGH_CONFIDENCE_IMAGE_THRESHOLD = 75.0;
 const HIGH_CONFIDENCE_IMAGGA_THRESHOLD = 70.0;
 const HIGH_CONFIDENCE_BOOST = 10.0;
-const MAX_RETURNED_MATCHES = 6;
-const MIN_MATCH_SCORE = 55.0;
-const MIN_DISPLAY_IMAGE_SCORE = 45.0;
+const MAX_RETURNED_MATCHES = 10;
+const MIN_MATCH_SCORE = 45.0;
+const MIN_DISPLAY_IMAGE_SCORE = 35.0;
 const MIN_VISUAL_SCORE = 60.0;
 const MIN_VISUAL_VERIFIED_MATCHES = 6;
 const MIN_SEMANTIC_IMAGGA_SCORE = 60.0;
@@ -861,6 +861,19 @@ function calculateFinalScore(
     array $imageMetrics = []
 ): float
 {
+    // When OpenCV is unavailable (imageScore ~0), use semantic-only weights so
+    // tag/keyword/category matches can still surface results.
+    if ($imageScore < 5.0) {
+        $semanticScore = ($imaggaScore * 0.55)
+            + ($jaccardScore * 0.30)
+            + ($categoryScore * 0.15);
+        $semanticScore = max(
+            $semanticScore,
+            calculateSemanticConfidenceFloor($imaggaScore, $jaccardScore, $categoryScore)
+        );
+        return clampPercent($semanticScore);
+    }
+
     $finalScore = ($imageScore * IMAGE_WEIGHT)
         + ($imaggaScore * IMAGGA_WEIGHT)
         + ($jaccardScore * JACCARD_WEIGHT)
@@ -882,7 +895,7 @@ function calculateFinalScore(
     );
 
     if (!$hasModerateVisualSupport) {
-        $finalScore = min($finalScore, max($imageScore, 44.0));
+        $finalScore = min($finalScore, max($imageScore, 55.0));
     } elseif (!$hasStrongVisualSupport && $imageScore < 55.0) {
         $finalScore = min($finalScore, max($imageScore, 59.0));
     }
@@ -963,8 +976,20 @@ function calculateSemanticConfidenceFloor(float $imaggaScore, float $jaccardScor
         return 72.0;
     }
 
-    if ($imaggaScore >= 45.0 && $jaccardScore >= 20.0 && $categoryScore >= 100.0) {
-        return 58.0;
+    if ($imaggaScore >= 45.0 && ($jaccardScore >= 15.0 || $categoryScore >= 100.0)) {
+        return 60.0;
+    }
+
+    if ($imaggaScore >= 35.0 && ($jaccardScore >= 10.0 || $categoryScore >= 100.0)) {
+        return 50.0;
+    }
+
+    if ($categoryScore >= 100.0 && $jaccardScore >= 10.0) {
+        return 45.0;
+    }
+
+    if ($jaccardScore >= 20.0) {
+        return 45.0;
     }
 
     return 0.0;
@@ -976,44 +1001,63 @@ function isRelevantMatch(array $result): bool
         return false;
     }
 
-    $finalScore = clampPercent((float) ($result['final_score'] ?? 0));
-    $imageScore = clampPercent((float) ($result['visual_score'] ?? $result['image_score'] ?? 0));
-    $imaggaScore = clampPercent((float) ($result['imagga_score'] ?? 0));
-    $jaccardScore = clampPercent((float) ($result['jaccard_score'] ?? 0));
+    $finalScore    = clampPercent((float) ($result['final_score'] ?? 0));
+    $imageScore    = clampPercent((float) ($result['visual_score'] ?? $result['image_score'] ?? 0));
+    $imaggaScore   = clampPercent((float) ($result['imagga_score'] ?? 0));
+    $jaccardScore  = clampPercent((float) ($result['jaccard_score'] ?? 0));
     $categoryScore = clampPercent((float) ($result['category_score'] ?? 0));
-    $orbScore = clampPercent((float) ($result['orb_score'] ?? 0));
+    $orbScore      = clampPercent((float) ($result['orb_score'] ?? 0));
     $histogramScore = clampPercent((float) ($result['histogram_score'] ?? 0));
-    $shapeScore = clampPercent((float) ($result['shape_score'] ?? 0));
+    $shapeScore    = clampPercent((float) ($result['shape_score'] ?? 0));
     $verifiedMatches = max(0, (int) ($result['verified_matches'] ?? 0));
-    $matchedTags = $result['matched_tags'] ?? [];
+    $matchedTags   = $result['matched_tags'] ?? [];
     $sameObjectFamily = !empty($result['family_allowed']);
-    $hasModerateVisualEvidence = hasModerateDatabaseImageMatch($imageScore, $result);
-    $hasStrongVisualEvidence = hasStrongDatabaseImageMatch($imageScore, $result);
-    $strongSemantic = (
-        $imaggaScore >= MIN_SEMANTIC_IMAGGA_SCORE
-        || ($imaggaScore >= 45.0 && $jaccardScore >= MIN_SEMANTIC_JACCARD_SCORE && ($categoryScore >= 100.0 || !empty($matchedTags)))
-    );
-    $hasVerifiedVisualEvidence = $verifiedMatches >= 5 && $orbScore >= 20.0 && $imageScore >= 35.0 && $histogramScore >= 35.0;
+
+    $hasModerateVisualEvidence  = hasModerateDatabaseImageMatch($imageScore, $result);
+    $hasStrongVisualEvidence    = hasStrongDatabaseImageMatch($imageScore, $result);
+    $hasVerifiedVisualEvidence  = $verifiedMatches >= 5 && $orbScore >= 20.0 && $imageScore >= 35.0 && $histogramScore >= 35.0;
     $hasStrongColorShapeAgreement = $imageScore >= 35.0 && $histogramScore >= 60.0 && $shapeScore >= 65.0;
-    $semanticSupportedByVisual = $strongSemantic
-        && $hasModerateVisualEvidence
-        && ($hasStrongVisualEvidence || ($imageScore >= 55.0 && $histogramScore >= 45.0) || $hasStrongColorShapeAgreement);
 
-    if (!$hasModerateVisualEvidence) {
-        return false;
+    // --- Visual paths (OpenCV available) ---
+    if ($hasStrongVisualEvidence) {
+        return true;
     }
 
-    if ($imageScore < MIN_DISPLAY_IMAGE_SCORE && !($strongSemantic && $finalScore >= MIN_MATCH_SCORE && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement))) {
-        return false;
+    if ($hasModerateVisualEvidence && $finalScore >= MIN_MATCH_SCORE) {
+        return true;
     }
 
-    $familySemanticMatch = (
-        $sameObjectFamily
-        && ($hasStrongVisualEvidence || $hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement)
-    );
+    if ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement) {
+        return $finalScore >= MIN_MATCH_SCORE;
+    }
 
-    return ($sameObjectFamily && ($hasStrongVisualEvidence || $semanticSupportedByVisual || $familySemanticMatch))
-        || (empty($result['uploaded_object_families'] ?? []) && ($hasStrongVisualEvidence || $semanticSupportedByVisual));
+    // --- Semantic paths (tags, keywords, color, category, title, description) ---
+    // Imagga tags strongly match item keywords/description
+    if ($imaggaScore >= 40.0 && ($jaccardScore >= 10.0 || $categoryScore >= 100.0 || count($matchedTags) >= 2)) {
+        return true;
+    }
+
+    // Category confirmed + keyword overlap from title/description/tags
+    if ($categoryScore >= 100.0 && $jaccardScore >= 8.0) {
+        return true;
+    }
+
+    // Strong keyword overlap from title, description, tags
+    if ($jaccardScore >= 20.0) {
+        return true;
+    }
+
+    // Same object type + any semantic signal (tag, keyword, or category)
+    if ($sameObjectFamily && ($imaggaScore >= 25.0 || $jaccardScore >= 8.0 || !empty($matchedTags))) {
+        return true;
+    }
+
+    // Good semantic score overall
+    if ($finalScore >= MIN_MATCH_SCORE && ($imaggaScore >= 25.0 || $jaccardScore >= 10.0)) {
+        return true;
+    }
+
+    return false;
 }
 
 function getMatchLevel(float $score): string
