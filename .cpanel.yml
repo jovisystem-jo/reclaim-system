@@ -3,7 +3,7 @@ deployment:
   tasks:
     - export DEPLOYPATH=/home/reclnebk/public_html
     - /bin/mkdir -p "$DEPLOYPATH"
-    - /usr/bin/rsync -rlt --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r --exclude='.git/' --exclude='.cpanel.yml' --exclude='.env' --exclude='vendor/' --exclude='android-user-app/' --exclude='assets/uploads/' --exclude='storage/sessions/' --exclude='README.md' --exclude='*.log' --exclude='register*_cookies.txt' --exclude='register_test_page.html' ./ "$DEPLOYPATH/"
+    - /usr/bin/rsync -rlt --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r --exclude='.git/' --exclude='.cpanel.yml' --exclude='.env' --exclude='assets/uploads/' --exclude='storage/sessions/' --exclude='README.md' --exclude='*.log' ./ "$DEPLOYPATH/"
     - /bin/mkdir -p "$DEPLOYPATH/assets/uploads" "$DEPLOYPATH/assets/uploads/profiles" "$DEPLOYPATH/assets/uploads/proofs" "$DEPLOYPATH/assets/uploads/signatures" "$DEPLOYPATH/storage/sessions"
     - /usr/bin/rsync -rlt --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r --exclude='cache/' --exclude='temp/' ./assets/uploads/ "$DEPLOYPATH/assets/uploads/"
     - /bin/chmod 755 "$DEPLOYPATH"
