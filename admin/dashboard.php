@@ -143,6 +143,10 @@ $base_url = app_base_path();
             padding: 15px 20px;
             border-radius: 20px 20px 0 0;
             font-weight: 600;
+            color: #2C3E50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .table-custom {
