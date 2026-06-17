@@ -284,54 +284,6 @@ $notificationsAvailable = $notification !== null;
             color: white;
         }
 
-        .notification-item {
-            padding: 15px;
-            border-bottom: 1px solid #e9ecef;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
-
-        .notification-item:hover {
-            background: #f8f9fa;
-        }
-
-        .notification-item.unread {
-            background: #fff8f0;
-            border-left: 3px solid #FF6B35;
-        }
-
-        .notification-icon {
-            width: 45px;
-            height: 45px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 15px;
-        }
-
-        .notification-icon.info { background: #e3f2fd; color: #2196f3; }
-        .notification-icon.success { background: #e8f5e9; color: #4caf50; }
-        .notification-icon.warning { background: #fff3e0; color: #ff9800; }
-        .notification-icon.danger { background: #ffebee; color: #f44336; }
-
-        .filter-btn {
-            margin-right: 10px;
-            border-radius: 50px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 38px;
-            line-height: 1;
-            text-align: center;
-        }
-
-        .filter-btn.active {
-            background: #FF6B35;
-            color: white;
-            border-color: #FF6B35;
-        }
-
         .email-log-item {
             padding: 10px 15px;
             border-bottom: 1px solid #e9ecef;
@@ -524,10 +476,10 @@ $notificationsAvailable = $notification !== null;
                     </div>
 
                     <div class="col-lg-7">
-                        <div class="card-modern card">
+                        <div class="card-modern card notification-list-card admin-notification-card">
                             <div class="card-header">
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-list me-2" style="color: #FF6B35;"></i> Your Notifications</span>
+                                    <span class="notification-card-title"><i class="fas fa-list me-2" style="color: #FF6B35;"></i> Your Notifications</span>
                                     <div>
                                         <form method="POST" action="" style="display: inline;">
                                             <?= csrf_field() ?>
@@ -540,73 +492,75 @@ $notificationsAvailable = $notification !== null;
                                 </div>
                             </div>
                             <div class="card-body p-0">
-                                <div class="p-3 border-bottom">
+                                <div class="admin-notification-filters">
                                     <a href="?filter=all" class="btn btn-sm filter-btn <?= $filter === 'all' ? 'active btn-primary-custom' : 'btn-outline-secondary' ?>">All</a>
                                     <a href="?filter=unread" class="btn btn-sm filter-btn <?= $filter === 'unread' ? 'active btn-primary-custom' : 'btn-outline-secondary' ?>">Unread</a>
                                     <a href="?filter=read" class="btn btn-sm filter-btn <?= $filter === 'read' ? 'active btn-primary-custom' : 'btn-outline-secondary' ?>">Read</a>
                                 </div>
 
-                                <?php if (empty($notifications)): ?>
-                                    <div class="text-center py-5">
-                                        <i class="fas fa-bell-slash fa-4x mb-3" style="color: #ccc;"></i>
-                                        <h5>No notifications found</h5>
-                                        <p class="text-muted">You'll see notifications here when there are updates</p>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach ($notifications as $notif): ?>
-                                        <?php
-                                        $notifType = in_array($notif['type'] ?? '', ['info', 'success', 'warning', 'danger'], true)
-                                            ? $notif['type']
-                                            : 'info';
-                                        $notifIcon = $notifType === 'info'
-                                            ? 'info-circle'
-                                            : ($notifType === 'success'
-                                                ? 'check-circle'
-                                                : ($notifType === 'warning' ? 'exclamation-triangle' : 'times-circle'));
-                                        ?>
-                                        <div class="notification-item <?= ((int) ($notif['is_read'] ?? 0) === 0) ? 'unread' : '' ?>">
-                                            <div class="d-flex">
-                                                <div class="notification-icon <?= $notifType ?>">
-                                                    <i class="fas fa-<?= $notifIcon ?>"></i>
-                                                </div>
-                                                <div class="flex-grow-1">
-                                                    <div class="d-flex justify-content-between align-items-start">
-                                                        <div>
-                                                            <strong><?= htmlspecialchars((string) ($notif['title'] ?? 'Notification')) ?></strong>
-                                                            <?php if ((int) ($notif['is_read'] ?? 0) === 0): ?>
-                                                                <span class="badge bg-primary ms-2">New</span>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                        <small class="text-muted">
-                                                            <?= htmlspecialchars(time_ago($notif['created_at'] ?? null)) ?>
-                                                        </small>
+                                <div class="admin-notification-stream">
+                                    <?php if (empty($notifications)): ?>
+                                        <div class="text-center py-5">
+                                            <i class="fas fa-bell-slash fa-4x mb-3" style="color: #ccc;"></i>
+                                            <h5>No notifications found</h5>
+                                            <p class="text-muted">You'll see notifications here when there are updates</p>
+                                        </div>
+                                    <?php else: ?>
+                                        <?php foreach ($notifications as $notif): ?>
+                                            <?php
+                                            $notifType = in_array($notif['type'] ?? '', ['info', 'success', 'warning', 'danger'], true)
+                                                ? $notif['type']
+                                                : 'info';
+                                            $notifIcon = $notifType === 'info'
+                                                ? 'info-circle'
+                                                : ($notifType === 'success'
+                                                    ? 'check-circle'
+                                                    : ($notifType === 'warning' ? 'exclamation-triangle' : 'times-circle'));
+                                            ?>
+                                            <div class="notification-item <?= ((int) ($notif['is_read'] ?? 0) === 0) ? 'unread' : '' ?>">
+                                                <div class="d-flex">
+                                                    <div class="notification-icon <?= $notifType ?>">
+                                                        <i class="fas fa-<?= $notifIcon ?>"></i>
                                                     </div>
-                                                    <p class="mb-2 text-muted mt-1"><?= nl2br(htmlspecialchars((string) ($notif['message'] ?? ''))) ?></p>
-                                                    <div class="mt-2">
-                                                        <?php if ((int) ($notif['is_read'] ?? 0) === 0): ?>
+                                                    <div class="flex-grow-1">
+                                                        <div class="d-flex justify-content-between align-items-start">
+                                                            <div>
+                                                                <strong><?= htmlspecialchars((string) ($notif['title'] ?? 'Notification')) ?></strong>
+                                                                <?php if ((int) ($notif['is_read'] ?? 0) === 0): ?>
+                                                                    <span class="badge bg-primary ms-2">New</span>
+                                                                <?php endif; ?>
+                                                            </div>
+                                                            <small class="text-muted">
+                                                                <?= htmlspecialchars(time_ago($notif['created_at'] ?? null)) ?>
+                                                            </small>
+                                                        </div>
+                                                        <p class="mb-2 text-muted mt-1"><?= nl2br(htmlspecialchars((string) ($notif['message'] ?? ''))) ?></p>
+                                                        <div class="mt-2">
+                                                            <?php if ((int) ($notif['is_read'] ?? 0) === 0): ?>
+                                                                <form method="POST" action="" style="display: inline;">
+                                                                    <?= csrf_field() ?>
+                                                                    <input type="hidden" name="action" value="mark_read">
+                                                                    <input type="hidden" name="notification_id" value="<?= (int) ($notif['notification_id'] ?? 0) ?>">
+                                                                    <button type="submit" class="btn btn-sm btn-link text-decoration-none p-0 me-3" <?= !$notificationsAvailable ? 'disabled' : '' ?>>
+                                                                        <i class="fas fa-check-circle"></i> Mark as read
+                                                                    </button>
+                                                                </form>
+                                                            <?php endif; ?>
                                                             <form method="POST" action="" style="display: inline;">
                                                                 <?= csrf_field() ?>
-                                                                <input type="hidden" name="action" value="mark_read">
+                                                                <input type="hidden" name="action" value="delete">
                                                                 <input type="hidden" name="notification_id" value="<?= (int) ($notif['notification_id'] ?? 0) ?>">
-                                                                <button type="submit" class="btn btn-sm btn-link text-decoration-none p-0 me-3" <?= !$notificationsAvailable ? 'disabled' : '' ?>>
-                                                                    <i class="fas fa-check-circle"></i> Mark as read
+                                                                <button type="submit" class="btn btn-sm btn-link text-danger text-decoration-none p-0" onclick="return confirm('Delete this notification?')">
+                                                                    <i class="fas fa-trash-alt"></i> Delete
                                                                 </button>
                                                             </form>
-                                                        <?php endif; ?>
-                                                        <form method="POST" action="" style="display: inline;">
-                                                            <?= csrf_field() ?>
-                                                            <input type="hidden" name="action" value="delete">
-                                                            <input type="hidden" name="notification_id" value="<?= (int) ($notif['notification_id'] ?? 0) ?>">
-                                                            <button type="submit" class="btn btn-sm btn-link text-danger text-decoration-none p-0" onclick="return confirm('Delete this notification?')">
-                                                                <i class="fas fa-trash-alt"></i> Delete
-                                                            </button>
-                                                        </form>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </div>
 
                                 <?php if ($total_pages > 1): ?>
                                     <div class="p-3 border-top">

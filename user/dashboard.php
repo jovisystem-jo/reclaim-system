@@ -219,84 +219,6 @@ $base_url = app_base_path();
         .quick-nav-buttons .btn i {
             line-height: 1;
         }
-        .notification-list {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        .notification-item {
-            padding: 12px 15px;
-            border-bottom: 1px solid #e0e0e0;
-            transition: background 0.2s;
-            cursor: pointer;
-        }
-        .notification-item:hover {
-            background: #f8f9fa;
-        }
-        .notification-item.unread {
-            background: #fff8f0;
-            border-left: 3px solid #FF8C00;
-        }
-        .notification-item.unread:hover {
-            background: #fff0e0;
-        }
-        .notification-icon-sm {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 12px;
-            flex-shrink: 0;
-        }
-        .notification-icon-sm.info { background: #e3f2fd; color: #2196f3; }
-        .notification-icon-sm.success { background: #e8f5e9; color: #4caf50; }
-        .notification-icon-sm.warning { background: #fff3e0; color: #ff9800; }
-        .notification-icon-sm.danger { background: #ffebee; color: #f44336; }
-        .notification-content-sm {
-            flex: 1;
-            min-width: 0;
-        }
-        .notification-title-sm {
-            font-weight: 600;
-            font-size: 14px;
-            margin-bottom: 3px;
-            color: #333;
-        }
-        .notification-message-sm {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 3px;
-        }
-        .notification-time-sm {
-            font-size: 11px;
-            color: #999;
-        }
-        .view-all-link {
-            display: block;
-            text-align: center;
-            padding: 10px;
-            background: #f8f9fa;
-            color: #FF8C00;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 13px;
-            border-top: 1px solid #e0e0e0;
-        }
-        .view-all-link:hover {
-            background: #e9ecef;
-            text-decoration: underline;
-        }
-        .no-notifications {
-            padding: 40px 20px;
-            text-align: center;
-            color: #999;
-        }
-        .no-notifications i {
-            font-size: 48px;
-            margin-bottom: 10px;
-            opacity: 0.5;
-        }
     </style>
 </head>
 <body>
@@ -456,7 +378,7 @@ $base_url = app_base_path();
 
             <!-- Recent Notifications -->
             <div class="col-md-6">
-                <div class="card">
+                <div class="card notification-list-card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5><i class="fas fa-bell"></i> Recent Notifications</h5>
                         <?php if($unread_count > 0): ?>
