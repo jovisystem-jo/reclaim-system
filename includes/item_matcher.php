@@ -108,9 +108,15 @@ class AutomaticItemMatchService {
 
             $imageMetrics = $this->calculateVisualSimilarityBetweenItems($sourceItem, $candidate);
             $imageScorePercent = round((float) ($imageMetrics['similarity'] ?? 0.0), 2);
-            $combinedScorePercent = $this->calculateCombinedScore($textScorePercent, $imageScorePercent);
+            $combinedScorePercent = $this->calculateCombinedScore(
+                $textScorePercent,
+                $imageScorePercent,
+                $imageMetrics,
+                $sharedMeaningfulTokens,
+                $sharedFamilies
+            );
 
-            if ($combinedScorePercent < 50.0) {
+            if ($combinedScorePercent < 55.0) {
                 continue;
             }
 
@@ -133,7 +139,8 @@ class AutomaticItemMatchService {
                     $sharedMeaningfulTokens,
                     $textScorePercent,
                     $imageScorePercent,
-                    $combinedScorePercent
+                    $combinedScorePercent,
+                    $imageMetrics
                 ),
                 'image_metrics' => $imageMetrics,
             ];
@@ -186,13 +193,52 @@ class AutomaticItemMatchService {
         }));
     }
 
-    private function calculateCombinedScore($textScorePercent, $imageScorePercent) {
-        $scores = [
-            max(0.0, min(100.0, (float) $textScorePercent)),
-            max(0.0, min(100.0, (float) $imageScorePercent)),
-        ];
+    private function calculateCombinedScore($textScorePercent, $imageScorePercent, array $imageMetrics = [], array $sharedTokens = [], array $sharedFamilies = []) {
+        $textScore = max(0.0, min(100.0, (float) $textScorePercent));
+        $imageScore = max(0.0, min(100.0, (float) $imageScorePercent));
+        $orbScore = max(0.0, min(100.0, (float) ($imageMetrics['orb_score'] ?? 0.0)));
+        $histogramScore = max(0.0, min(100.0, (float) ($imageMetrics['histogram_score'] ?? 0.0)));
+        $shapeScore = max(0.0, min(100.0, (float) ($imageMetrics['shape_score'] ?? 0.0)));
+        $verifiedMatches = max(0, (int) ($imageMetrics['verified_matches'] ?? 0));
 
-        return round(max($scores), 2);
+        if ($imageScore <= 0.0) {
+            return round($textScore, 2);
+        }
+
+        if ($textScore <= 0.0) {
+            return round($imageScore, 2);
+        }
+
+        $combinedScore = ($imageScore * 0.70) + ($textScore * 0.30);
+
+        if ($imageScore >= 75.0 && $textScore >= 20.0 && $verifiedMatches >= 8 && $orbScore >= 35.0) {
+            $combinedScore = max($combinedScore, 84.0);
+        } elseif (
+            $imageScore >= 65.0
+            && $textScore >= 18.0
+            && $verifiedMatches >= 5
+            && $orbScore >= 35.0
+            && $histogramScore >= 70.0
+            && $shapeScore >= 65.0
+        ) {
+            $combinedScore = max($combinedScore, 80.0);
+        } elseif (
+            $imageScore >= 62.0
+            && $textScore >= 12.0
+            && ($verifiedMatches >= 6 || $histogramScore >= 65.0 || $shapeScore >= 70.0)
+        ) {
+            $combinedScore = max($combinedScore, 68.0);
+        }
+
+        if (empty($sharedTokens) && $textScore < 10.0 && $imageScore < 60.0) {
+            $combinedScore *= 0.75;
+        }
+
+        if (!empty($sharedFamilies) && $imageScore >= 55.0 && $textScore >= 12.0) {
+            $combinedScore += 4.0;
+        }
+
+        return round(max(0.0, min(100.0, $combinedScore)), 2);
     }
 
     private function normalizeStoredScore($percentScore) {
@@ -502,13 +548,23 @@ class AutomaticItemMatchService {
         error_log($message);
     }
 
-    private function buildMatchReason(array $sharedFamilies, array $sharedTokens, $textScorePercent, $imageScorePercent, $combinedScorePercent) {
+    private function buildMatchReason(array $sharedFamilies, array $sharedTokens, $textScorePercent, $imageScorePercent, $combinedScorePercent, array $imageMetrics = []) {
         $reasonParts = [
             'Object family match: ' . implode(', ', $sharedFamilies),
             'Combined score: ' . $this->formatPercent($combinedScorePercent) . '%',
             'Text score: ' . $this->formatPercent($textScorePercent) . '%',
             'Image score: ' . $this->formatPercent($imageScorePercent) . '%',
         ];
+
+        if (!empty($imageMetrics)) {
+            $reasonParts[] = sprintf(
+                'Visual breakdown: ORB %s%% | Color %s%% | Shape %s%% | Verified %d',
+                $this->formatPercent((float) ($imageMetrics['orb_score'] ?? 0)),
+                $this->formatPercent((float) ($imageMetrics['histogram_score'] ?? 0)),
+                $this->formatPercent((float) ($imageMetrics['shape_score'] ?? 0)),
+                max(0, (int) ($imageMetrics['verified_matches'] ?? 0))
+            );
+        }
 
         if (!empty($sharedTokens)) {
             $reasonParts[] = 'Shared terms: ' . implode(', ', array_slice($sharedTokens, 0, 6));

@@ -186,6 +186,429 @@ function imaggaMultipartRequest($url, $apiKey, $apiSecret, array $fields, $metho
     ];
 }
 
+function imaggaIsInformativeTag($tagName) {
+    $normalized = strtolower(trim((string) $tagName));
+    if ($normalized === '') {
+        return false;
+    }
+
+    $genericTags = [
+        '3d' => true,
+        'art' => true,
+        'bag' => true,
+        'container' => true,
+        'device' => true,
+        'electronic equipment' => true,
+        'envelope' => true,
+        'equipment' => true,
+        'gem' => true,
+        'graphic' => true,
+        'hand' => true,
+        'hour' => true,
+        'hour hand' => true,
+        'indicator' => true,
+        'luggage and bags' => true,
+        'memory' => true,
+        'minute' => true,
+        'minute hand' => true,
+        'modem' => true,
+        'object' => true,
+        'pointer' => true,
+        'product' => true,
+        'purse' => true,
+        'radio' => true,
+        'technology' => true,
+        'time' => true,
+        'vessel' => true,
+    ];
+
+    return !isset($genericTags[$normalized]);
+}
+
+function imaggaNormalizeText($value) {
+    $value = strtolower(trim((string) $value));
+    $value = preg_replace('/[^a-z0-9]+/i', ' ', $value) ?? '';
+    $value = preg_replace('/\s+/', ' ', $value) ?? '';
+    return trim($value);
+}
+
+function imaggaNormalizeToken($value) {
+    $value = strtolower(trim((string) $value));
+    $value = preg_replace('/[^a-z0-9]+/i', '', $value) ?? '';
+
+    if ($value === '') {
+        return '';
+    }
+
+    if (strlen($value) > 4 && str_ends_with($value, 'ies')) {
+        return substr($value, 0, -3) . 'y';
+    }
+
+    if (strlen($value) > 3
+        && str_ends_with($value, 's')
+        && !str_ends_with($value, 'ss')
+        && !str_ends_with($value, 'us')
+        && !str_ends_with($value, 'is')
+        && !str_ends_with($value, 'sses')) {
+        return substr($value, 0, -1);
+    }
+
+    return $value;
+}
+
+function imaggaTokenizeText($value) {
+    $normalized = imaggaNormalizeText($value);
+    if ($normalized === '') {
+        return [];
+    }
+
+    $tokens = [];
+    foreach (preg_split('/\s+/', $normalized) ?: [] as $token) {
+        $token = imaggaNormalizeToken($token);
+        if ($token === '' || strlen($token) < 2) {
+            continue;
+        }
+
+        $tokens[$token] = true;
+    }
+
+    return array_keys($tokens);
+}
+
+function imaggaPhraseContainsAlias($text, $alias) {
+    $normalizedText = imaggaNormalizeText($text);
+    $normalizedAlias = imaggaNormalizeText($alias);
+
+    if ($normalizedText === '' || $normalizedAlias === '') {
+        return false;
+    }
+
+    if (strpos(' ' . $normalizedText . ' ', ' ' . $normalizedAlias . ' ') !== false) {
+        return true;
+    }
+
+    $collapsedText = str_replace(' ', '', $normalizedText);
+    $collapsedAlias = str_replace(' ', '', $normalizedAlias);
+
+    return $collapsedAlias !== '' && strpos($collapsedText, $collapsedAlias) !== false;
+}
+
+function imaggaGetObjectFamilyAliases() {
+    return [
+        'bottle_household' => ['water bottle', 'bottle', 'flask', 'tumbler', 'thermos', 'hydro flask'],
+        'wallet' => ['wallet', 'purse', 'card holder', 'cardholder', 'billfold'],
+        'watch' => ['watch', 'wristwatch', 'clock', 'smartwatch'],
+        'earbuds_audio' => ['wireless earbuds', 'earbuds', 'earpod', 'earpods', 'airpod', 'airpods', 'earphone', 'earphones', 'charging case', 'headset', 'headphones'],
+        'powerbank_charger' => ['powerbank', 'power bank', 'portable charger', 'charger', 'battery pack'],
+        'pencil_case' => ['pencil case', 'pencil pouch', 'stationery pouch', 'zipper pouch', 'pouch'],
+        'bracelet' => ['bracelet', 'bangle', 'wristband'],
+        'bag' => ['bag', 'handbag', 'tote bag', 'backpack', 'purse'],
+        'phone' => ['phone', 'smartphone', 'mobile phone', 'iphone', 'android phone'],
+        'key' => ['key', 'keys', 'keychain', 'key ring'],
+    ];
+}
+
+function imaggaGetCategoryAliases($category) {
+    $normalizedCategory = imaggaNormalizeText($category);
+    $aliases = [
+        'electronics' => ['earbuds', 'earpod', 'airpods', 'powerbank', 'portable charger', 'charger', 'phone'],
+        'wallet' => ['wallet', 'purse', 'card holder'],
+        'jewelry' => ['bracelet', 'bangle', 'ring', 'necklace'],
+        'household' => ['water bottle', 'bottle', 'flask', 'tumbler'],
+        'books' => ['pencil case', 'pencil pouch', 'stationery pouch', 'pouch'],
+        'bag' => ['bag', 'handbag', 'wallet', 'purse'],
+        'accessories' => ['watch', 'wristwatch', 'bracelet', 'glasses'],
+    ];
+
+    $categoryAliases = $aliases[$normalizedCategory] ?? [];
+    if ($normalizedCategory !== '' && !in_array($normalizedCategory, [
+        'electronics',
+        'accessories',
+        'books',
+        'household',
+        'others',
+        'other',
+    ], true)) {
+        $categoryAliases[] = $normalizedCategory;
+    }
+
+    $normalizedAliases = [];
+    foreach ($categoryAliases as $alias) {
+        $normalizedAlias = imaggaNormalizeText($alias);
+        if ($normalizedAlias !== '') {
+            $normalizedAliases[$normalizedAlias] = true;
+        }
+    }
+
+    return array_keys($normalizedAliases);
+}
+
+function imaggaDetectObjectFamiliesFromText($text) {
+    $normalizedText = imaggaNormalizeText($text);
+    if ($normalizedText === '') {
+        return [];
+    }
+
+    $families = [];
+    foreach (imaggaGetObjectFamilyAliases() as $family => $aliases) {
+        foreach ($aliases as $alias) {
+            if (imaggaPhraseContainsAlias($normalizedText, $alias)) {
+                $families[$family] = true;
+                break;
+            }
+        }
+    }
+
+    return array_keys($families);
+}
+
+function imaggaBuildContextTags(array $itemContext) {
+    $title = imaggaNormalizeText($itemContext['title'] ?? '');
+    $description = imaggaNormalizeText($itemContext['description'] ?? '');
+    $category = imaggaNormalizeText($itemContext['category'] ?? '');
+    $brand = imaggaNormalizeText($itemContext['brand'] ?? '');
+    $color = imaggaNormalizeText($itemContext['color'] ?? '');
+    $contextText = trim(implode(' ', array_filter([$title, $description, $category, $brand, $color])));
+    $specificContextText = trim(implode(' ', array_filter([$title, $description, $brand])));
+
+    if ($contextText === '') {
+        return [];
+    }
+
+    $tags = [];
+    $families = imaggaDetectObjectFamiliesFromText($specificContextText);
+    if (empty($families)) {
+        $families = imaggaDetectObjectFamiliesFromText($contextText);
+    }
+    $aliasesByFamily = imaggaGetObjectFamilyAliases();
+
+    foreach ($families as $family) {
+        $aliases = $aliasesByFamily[$family] ?? [];
+        if (empty($aliases)) {
+            continue;
+        }
+
+        $tags[imaggaNormalizeText($aliases[0])] = true;
+
+        $matchedAliasCount = 0;
+        foreach ($aliases as $alias) {
+            $normalizedAlias = imaggaNormalizeText($alias);
+            if ($normalizedAlias === '') {
+                continue;
+            }
+
+            if (imaggaPhraseContainsAlias($title, $normalizedAlias) || imaggaPhraseContainsAlias($description, $normalizedAlias)) {
+                $tags[$normalizedAlias] = true;
+                $matchedAliasCount++;
+            }
+
+            if ($matchedAliasCount >= 2) {
+                break;
+            }
+        }
+    }
+
+    foreach (imaggaGetCategoryAliases($category) as $alias) {
+        $aliasFamilies = imaggaDetectObjectFamiliesFromText($alias);
+        if (!empty($families)) {
+            if (empty($aliasFamilies) || empty(array_intersect($families, $aliasFamilies))) {
+                continue;
+            }
+        }
+
+        $tags[$alias] = true;
+    }
+
+    if (empty($tags) && $title !== '') {
+        $titleTokens = imaggaTokenizeText($title);
+        if (!empty($titleTokens)) {
+            $fallbackTag = trim(implode(' ', array_slice($titleTokens, 0, min(3, count($titleTokens)))));
+            if ($fallbackTag !== '') {
+                $tags[$fallbackTag] = true;
+            }
+        }
+    }
+
+    return array_slice(array_keys($tags), 0, 6);
+}
+
+function imaggaFilterTagsForItemContext(array $tags, array $itemContext) {
+    $title = imaggaNormalizeText($itemContext['title'] ?? '');
+    $description = imaggaNormalizeText($itemContext['description'] ?? '');
+    $category = imaggaNormalizeText($itemContext['category'] ?? '');
+    $brand = imaggaNormalizeText($itemContext['brand'] ?? '');
+    $color = imaggaNormalizeText($itemContext['color'] ?? '');
+    $contextText = trim(implode(' ', array_filter([$title, $description, $category, $brand, $color])));
+    $specificContextText = trim(implode(' ', array_filter([$title, $description, $brand])));
+    $contextTags = imaggaBuildContextTags($itemContext);
+
+    $normalizedRawTags = [];
+    foreach ($tags as $tag) {
+        $normalizedTag = imaggaNormalizeText($tag);
+        if ($normalizedTag !== '') {
+            $normalizedRawTags[$normalizedTag] = true;
+        }
+    }
+
+    if ($contextText === '') {
+        return array_slice(array_keys($normalizedRawTags), 0, 6);
+    }
+
+    $contextFamilies = imaggaDetectObjectFamiliesFromText($specificContextText);
+    if (empty($contextFamilies)) {
+        $contextFamilies = imaggaDetectObjectFamiliesFromText($contextText);
+    }
+    $contextTokens = imaggaTokenizeText($contextText);
+    $contextTokenLookup = array_fill_keys($contextTokens, true);
+    $categoryAliases = imaggaGetCategoryAliases($category);
+    $filteredRawTags = [];
+
+    foreach (array_keys($normalizedRawTags) as $tag) {
+        $tagFamilies = imaggaDetectObjectFamiliesFromText($tag);
+        if (!empty($contextFamilies) && !empty($tagFamilies) && empty(array_intersect($contextFamilies, $tagFamilies))) {
+            continue;
+        }
+
+        $score = 0;
+
+        if (imaggaPhraseContainsAlias($contextText, $tag)) {
+            $score += 4;
+        }
+
+        foreach ($contextTags as $contextTag) {
+            if (imaggaPhraseContainsAlias($contextTag, $tag) || imaggaPhraseContainsAlias($tag, $contextTag)) {
+                $score += 3;
+                break;
+            }
+        }
+
+        if (!empty($tagFamilies) && !empty(array_intersect($contextFamilies, $tagFamilies))) {
+            $score += 3;
+        }
+
+        foreach ($categoryAliases as $alias) {
+            if (imaggaPhraseContainsAlias($alias, $tag) || imaggaPhraseContainsAlias($tag, $alias)) {
+                $score += 2;
+                break;
+            }
+        }
+
+        $tagTokens = imaggaTokenizeText($tag);
+        $matchedTokenCount = 0;
+        foreach ($tagTokens as $token) {
+            if (isset($contextTokenLookup[$token])) {
+                $matchedTokenCount++;
+            }
+        }
+
+        if (!empty($tagTokens) && $matchedTokenCount === count($tagTokens)) {
+            $score += 2;
+        } elseif ($matchedTokenCount > 0) {
+            $score += 1;
+        }
+
+        if ($score >= 2) {
+            $filteredRawTags[$tag] = true;
+        }
+    }
+
+    $finalTags = [];
+    foreach ($contextTags as $contextTag) {
+        $finalTags[$contextTag] = true;
+    }
+    foreach (array_keys($filteredRawTags) as $tag) {
+        $finalTags[$tag] = true;
+    }
+
+    if (empty($finalTags)) {
+        foreach (array_keys($normalizedRawTags) as $tag) {
+            $finalTags[$tag] = true;
+            if (count($finalTags) >= 3) {
+                break;
+            }
+        }
+    }
+
+    return array_slice(array_keys($finalTags), 0, 6);
+}
+
+function extractImaggaTagsForImage($imagePath, $apiKey = null, $apiSecret = null, $minConfidence = 35.0, $limit = 12) {
+    $config = getImaggaSimilarityConfig();
+    $apiKey = trim((string) ($apiKey ?? $config['api_key']));
+    $apiSecret = trim((string) ($apiSecret ?? $config['api_secret']));
+
+    if (!is_file($imagePath)) {
+        return imaggaFailureResult('Item image file not found for Imagga tag extraction.', ['skipped' => true]);
+    }
+
+    if ($apiKey === '' || $apiSecret === '') {
+        return imaggaFailureResult('Imagga API credentials not configured.', ['skipped' => true]);
+    }
+
+    $imageField = imaggaCreateMultipartImageField($imagePath);
+    if (!$imageField['success']) {
+        return $imageField;
+    }
+
+    $response = imaggaMultipartRequest(
+        'https://api.imagga.com/v2/tags',
+        $apiKey,
+        $apiSecret,
+        ['image' => $imageField['file']],
+        'POST'
+    );
+
+    if (!$response['success']) {
+        return $response;
+    }
+
+    $tagMap = [];
+    foreach (($response['response']['result']['tags'] ?? []) as $entry) {
+        $tagName = trim((string) ($entry['tag']['en'] ?? $entry['tag'] ?? ''));
+        $confidence = (float) ($entry['confidence'] ?? 0);
+
+        if ($tagName === '' || $confidence < (float) $minConfidence || !imaggaIsInformativeTag($tagName)) {
+            continue;
+        }
+
+        if (!isset($tagMap[$tagName]) || $confidence > $tagMap[$tagName]) {
+            $tagMap[$tagName] = round($confidence, 2);
+        }
+    }
+
+    arsort($tagMap, SORT_NUMERIC);
+    if ((int) $limit > 0) {
+        $tagMap = array_slice($tagMap, 0, (int) $limit, true);
+    }
+
+    return [
+        'success' => true,
+        'tags' => array_keys($tagMap),
+        'tag_confidences' => $tagMap,
+        'response' => $response['response'],
+    ];
+}
+
+function ensureItemsImageTagsColumn(PDO $db) {
+    static $columnEnsured = false;
+
+    if ($columnEnsured) {
+        return;
+    }
+
+    try {
+        $db->query('SELECT image_tags FROM items LIMIT 1');
+    } catch (PDOException $e) {
+        if ($e->getCode() !== '42S22') {
+            throw $e;
+        }
+
+        $db->exec("ALTER TABLE items ADD COLUMN image_tags TEXT DEFAULT NULL");
+    }
+
+    $columnEnsured = true;
+}
+
 function trainImaggaCollection($collectionId, $apiKey, $apiSecret, $categorizerId = null) {
     $config = getImaggaSimilarityConfig();
     $categorizerId = $categorizerId ?: $config['categorizer_id'];
@@ -575,18 +998,6 @@ function findSimilarItemsWithImaggaForItem(PDO $db, array $item, array $options 
 
 function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
     $config = getImaggaSimilarityConfig();
-    if ($config['api_key'] === '' || $config['api_secret'] === '' || $config['collection_id'] === '') {
-        return [
-            'success' => false,
-            'skipped' => true,
-            'error' => 'Imagga visual similarity is not configured.',
-        ];
-    }
-
-    $dependencyStatus = imaggaDependenciesAvailable();
-    if (empty($dependencyStatus['available'])) {
-        return imaggaFailureResult($dependencyStatus['error'], ['skipped' => true]);
-    }
 
     if ($relativeImagePath === null || $relativeImagePath === '') {
         return [
@@ -596,23 +1007,84 @@ function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
         ];
     }
 
+    $dependencyStatus = imaggaDependenciesAvailable();
+    if (empty($dependencyStatus['available'])) {
+        return imaggaFailureResult($dependencyStatus['error'], ['skipped' => true]);
+    }
+
+    $absoluteImagePath = __DIR__ . '/../' . ltrim((string)$relativeImagePath, '/\\');
+    if (!is_file($absoluteImagePath)) {
+        return imaggaFailureResult('Item image file not found for Imagga indexing.', ['skipped' => true]);
+    }
+
+    $storedTags = [];
+    $tagsSynced = false;
+    $itemContext = [
+        'title' => '',
+        'description' => '',
+        'category' => '',
+        'brand' => '',
+        'color' => '',
+        'imagga_image_id' => '',
+    ];
+
     try {
         ensureItemsImaggaColumn($db);
+        ensureItemsImageTagsColumn($db);
 
-        $stmt = $db->prepare('SELECT imagga_image_id FROM items WHERE item_id = ?');
+        $stmt = $db->prepare('
+            SELECT imagga_image_id, title, description, category, brand, color
+            FROM items
+            WHERE item_id = ?
+            LIMIT 1
+        ');
         $stmt->execute([(int)$itemId]);
-        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        if (!empty($existing)) {
+            $itemContext = array_merge($itemContext, $existing);
+        }
     } catch (PDOException $e) {
         error_log('Imagga column preparation failed for item ' . (int)$itemId . ': ' . $e->getMessage());
         return imaggaFailureResult('Unable to prepare local item image indexing.');
     }
 
-    $imageId = $existing['imagga_image_id'] ?? '';
+    $storedTags = imaggaBuildContextTags($itemContext);
+
+    if ($config['api_key'] !== '' && $config['api_secret'] !== '') {
+        $tagResult = extractImaggaTagsForImage($absoluteImagePath, $config['api_key'], $config['api_secret']);
+        if (!empty($tagResult['success'])) {
+            $storedTags = imaggaFilterTagsForItemContext((array) ($tagResult['tags'] ?? []), $itemContext);
+        } elseif (empty($tagResult['skipped'])) {
+            error_log('Imagga tag extraction failed for item ' . (int) $itemId . ': ' . ($tagResult['error'] ?? 'Unknown error'));
+        }
+    }
+
+    if (!empty($storedTags)) {
+        try {
+            $tagStatement = $db->prepare('UPDATE items SET image_tags = ? WHERE item_id = ?');
+            $tagStatement->execute([implode(', ', $storedTags), (int) $itemId]);
+            $tagsSynced = true;
+        } catch (PDOException $e) {
+            error_log('Imagga tag update failed for item ' . (int) $itemId . ': ' . $e->getMessage());
+        }
+    }
+
+    if ($config['api_key'] === '' || $config['api_secret'] === '' || $config['collection_id'] === '') {
+        return [
+            'success' => $tagsSynced,
+            'skipped' => !$tagsSynced,
+            'error' => $tagsSynced ? '' : 'Imagga visual similarity is not configured.',
+            'tags' => $storedTags,
+            'tags_synced' => $tagsSynced,
+            'train_success' => false,
+        ];
+    }
+
+    $imageId = $itemContext['imagga_image_id'] ?? '';
     if ($imageId === '') {
         $imageId = 'item-' . (int)$itemId;
     }
 
-    $absoluteImagePath = __DIR__ . '/../' . ltrim((string)$relativeImagePath, '/\\');
     $indexResult = addImageToImaggaCollection(
         $absoluteImagePath,
         $config['collection_id'],
@@ -623,6 +1095,8 @@ function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
     );
 
     if (!$indexResult['success']) {
+        $indexResult['tags'] = $storedTags;
+        $indexResult['tags_synced'] = $tagsSynced;
         return $indexResult;
     }
 
@@ -638,6 +1112,8 @@ function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
     return [
         'success' => true,
         'image_id' => $storedImageId,
+        'tags' => $storedTags,
+        'tags_synced' => $tagsSynced,
         'train_success' => $indexResult['train_success'] ?? false,
     ];
 }

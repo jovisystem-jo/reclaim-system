@@ -24,10 +24,10 @@ const IMAGGA_TOTAL_TIMEOUT_SECONDS = 8;
 const PYTHON_DISCOVERY_TIMEOUT_SECONDS = 2.0;
 const PYTHON_DEPENDENCY_TIMEOUT_SECONDS = 2.0;
 const PYTHON_COMPARE_TIMEOUT_SECONDS = 4.0;
-const IMAGE_WEIGHT = 0.40;
-const IMAGGA_WEIGHT = 0.30;
-const JACCARD_WEIGHT = 0.20;
-const CATEGORY_WEIGHT = 0.10;
+const IMAGE_WEIGHT = 0.70;
+const IMAGGA_WEIGHT = 0.15;
+const JACCARD_WEIGHT = 0.10;
+const CATEGORY_WEIGHT = 0.05;
 const HIGH_CONFIDENCE_IMAGE_THRESHOLD = 75.0;
 const HIGH_CONFIDENCE_IMAGGA_THRESHOLD = 70.0;
 const HIGH_CONFIDENCE_BOOST = 10.0;
@@ -176,6 +176,7 @@ try {
     }
 
     $results = [];
+    $comparableItemCount = 0;
     $processingBudgetExceeded = false;
 
     foreach ($items as $item) {
@@ -183,6 +184,13 @@ try {
             $processingBudgetExceeded = true;
             break;
         }
+
+        $itemImagePath = getFullImagePath((string) ($item['image_url'] ?? ''));
+        if ($itemImagePath === null || !is_file($itemImagePath)) {
+            continue;
+        }
+
+        $comparableItemCount++;
 
         $itemText = buildItemSearchText($item);
         $itemKeywords = generateItemKeywords($item);
@@ -200,12 +208,9 @@ try {
         $matchedTags = getMatchedTags($informativeUploadedTags, $itemKeywords, $itemText);
 
         $imageMetrics = createEmptyImageMetrics();
-        $itemImagePath = getFullImagePath((string) ($item['image_url'] ?? ''));
 
         if (
             $pythonCommand !== null
-            && $itemImagePath !== null
-            && is_file($itemImagePath)
             && !hasExceededProcessingBudget($requestStartedAt, 3.0)
         ) {
             $imageMetrics = calculateVisualSimilarity($uploadedImagePath, $itemImagePath, $pythonCommand);
@@ -223,7 +228,7 @@ try {
                 calculateObjectFamilyConfidenceFloor($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $matchedTags)
             );
         }
-        $displayScore = round(calculateDisplayedSimilarityScore($imageScore), 2);
+        $displayScore = round(calculateDisplayedSimilarityScore($imageScore, $finalScore, $imaggaScore, $jaccardScore, $categoryScore), 2);
 
         $results[] = [
             'item_id' => (int) $item['item_id'],
@@ -252,11 +257,22 @@ try {
             'keypoints_image1' => max(0, (int) ($imageMetrics['keypoints_image1'] ?? 0)),
             'keypoints_image2' => max(0, (int) ($imageMetrics['keypoints_image2'] ?? 0)),
             'matched_tags' => $matchedTags,
-            'match_reason' => buildMatchReason($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $matchedTags),
+            'match_reason' => buildMatchReason($imageScore, $imaggaScore, $jaccardScore, $categoryScore, $matchedTags, $imageMetrics),
             // Compatibility fields used by the existing search UI.
             'visual_score' => $imageScore,
             'similarity_percentage' => $displayScore,
         ];
+    }
+
+    if ($comparableItemCount === 0) {
+        respondJson([
+            'success' => true,
+            'analysis_id' => null,
+            'uploaded_tags' => $uploadedTags,
+            'matches' => [],
+            'total_matches' => 0,
+            'message' => 'No active lost or found items with stored images were found in the database.',
+        ]);
     }
 
     if ($processingBudgetExceeded) {
@@ -337,6 +353,8 @@ function fetchSearchableItems(PDO $db): array
         SELECT item_id, title, description, category, brand, color, image_tags, image_url, status, reported_date, date_found
         FROM items
         WHERE status IN ('lost', 'found')
+          AND image_url IS NOT NULL
+          AND image_url <> ''
         ORDER BY COALESCE(date_found, reported_date) DESC, item_id DESC
         LIMIT " . MAX_SEARCHABLE_ITEMS . "
     ");
@@ -851,13 +869,59 @@ function calculateFinalScore(
         $finalScore += HIGH_CONFIDENCE_BOOST;
     }
 
+    $hasModerateVisualSupport = hasModerateDatabaseImageMatch($imageScore, $imageMetrics);
+    $hasStrongVisualSupport = hasStrongDatabaseImageMatch($imageScore, $imageMetrics);
+
     $finalScore = max(
         $finalScore,
         calculateVisualConfidenceFloor($imageScore, $imageMetrics),
-        calculateSemanticConfidenceFloor($imaggaScore, $jaccardScore, $categoryScore)
+        $hasModerateVisualSupport
+            ? calculateSemanticConfidenceFloor($imaggaScore, $jaccardScore, $categoryScore)
+            : 0.0
     );
 
+    if (!$hasModerateVisualSupport) {
+        $finalScore = min($finalScore, max($imageScore, 44.0));
+    } elseif (!$hasStrongVisualSupport && $imageScore < 55.0) {
+        $finalScore = min($finalScore, max($imageScore, 59.0));
+    }
+
     return clampPercent($finalScore);
+}
+
+function hasModerateDatabaseImageMatch(float $imageScore, array $imageMetrics): bool
+{
+    $verifiedMatches = max(0, (int) ($imageMetrics['verified_matches'] ?? 0));
+    $orbScore = clampPercent((float) ($imageMetrics['orb_score'] ?? 0));
+    $histogramScore = clampPercent((float) ($imageMetrics['histogram_score'] ?? 0));
+    $shapeScore = clampPercent((float) ($imageMetrics['shape_score'] ?? 0));
+
+    return (
+        ($imageScore >= 35.0 && $verifiedMatches >= 5 && $orbScore >= 20.0 && $histogramScore >= 35.0)
+        || ($imageScore >= 45.0 && $histogramScore >= 55.0 && $shapeScore >= 60.0)
+        || ($imageScore >= 50.0 && $verifiedMatches >= 4 && $orbScore >= 25.0 && $histogramScore >= 30.0 && $shapeScore >= 65.0)
+    );
+}
+
+function hasStrongDatabaseImageMatch(float $imageScore, array $imageMetrics): bool
+{
+    $verifiedMatches = max(0, (int) ($imageMetrics['verified_matches'] ?? 0));
+    $orbScore = clampPercent((float) ($imageMetrics['orb_score'] ?? 0));
+    $histogramScore = clampPercent((float) ($imageMetrics['histogram_score'] ?? 0));
+    $shapeScore = clampPercent((float) ($imageMetrics['shape_score'] ?? 0));
+
+    return (
+        ($imageScore >= 70.0 && $verifiedMatches >= 5 && $orbScore >= 30.0 && $histogramScore >= 35.0)
+        || (
+            $imageScore >= MIN_VISUAL_SCORE
+            && $verifiedMatches >= MIN_VISUAL_VERIFIED_MATCHES
+            && $orbScore >= 25.0
+            && ($histogramScore >= 40.0 || $shapeScore >= 55.0)
+        )
+        || ($imageScore >= 55.0 && $verifiedMatches >= 5 && $orbScore >= 40.0 && $histogramScore >= 45.0)
+        || ($imageScore >= 55.0 && $verifiedMatches >= 8 && $orbScore >= 25.0 && $histogramScore >= 50.0)
+        || ($imageScore >= 65.0 && $histogramScore >= 65.0 && $shapeScore >= 65.0)
+    );
 }
 
 function calculateVisualConfidenceFloor(float $imageScore, array $imageMetrics): float
@@ -922,33 +986,33 @@ function isRelevantMatch(array $result): bool
     $verifiedMatches = max(0, (int) ($result['verified_matches'] ?? 0));
     $matchedTags = $result['matched_tags'] ?? [];
     $sameObjectFamily = !empty($result['family_allowed']);
+    $hasModerateVisualEvidence = hasModerateDatabaseImageMatch($imageScore, $result);
+    $hasStrongVisualEvidence = hasStrongDatabaseImageMatch($imageScore, $result);
     $strongSemantic = (
         $imaggaScore >= MIN_SEMANTIC_IMAGGA_SCORE
         || ($imaggaScore >= 45.0 && $jaccardScore >= MIN_SEMANTIC_JACCARD_SCORE && ($categoryScore >= 100.0 || !empty($matchedTags)))
     );
-    $hasVerifiedVisualEvidence = $verifiedMatches >= 5 && $orbScore >= 15.0 && $imageScore >= 25.0;
-    $hasStrongColorShapeAgreement = $imageScore >= 35.0 && $histogramScore >= 55.0 && $shapeScore >= 60.0;
+    $hasVerifiedVisualEvidence = $verifiedMatches >= 5 && $orbScore >= 20.0 && $imageScore >= 35.0 && $histogramScore >= 35.0;
+    $hasStrongColorShapeAgreement = $imageScore >= 35.0 && $histogramScore >= 60.0 && $shapeScore >= 65.0;
     $semanticSupportedByVisual = $strongSemantic
-        && ($imageScore >= 55.0 || $hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement);
+        && $hasModerateVisualEvidence
+        && ($hasStrongVisualEvidence || ($imageScore >= 55.0 && $histogramScore >= 45.0) || $hasStrongColorShapeAgreement);
+
+    if (!$hasModerateVisualEvidence) {
+        return false;
+    }
 
     if ($imageScore < MIN_DISPLAY_IMAGE_SCORE && !($strongSemantic && $finalScore >= MIN_MATCH_SCORE && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement))) {
         return false;
     }
 
-    $strongVisual = (
-        ($imageScore >= 70.0 && $verifiedMatches >= 5 && $orbScore >= 30.0)
-        || ($imageScore >= MIN_VISUAL_SCORE && $verifiedMatches >= MIN_VISUAL_VERIFIED_MATCHES && $orbScore >= 25.0)
-        || ($imageScore >= 55.0 && $verifiedMatches >= 5 && $orbScore >= 40.0)
-        || ($imageScore >= 55.0 && $verifiedMatches >= 8 && $orbScore >= 25.0)
-    );
-
     $familySemanticMatch = (
         $sameObjectFamily
-        && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement)
+        && ($hasStrongVisualEvidence || $hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement)
     );
 
-    return ($sameObjectFamily && ($strongVisual || $semanticSupportedByVisual || $familySemanticMatch))
-        || (empty($result['uploaded_object_families'] ?? []) && ($strongVisual || $semanticSupportedByVisual));
+    return ($sameObjectFamily && ($hasStrongVisualEvidence || $semanticSupportedByVisual || $familySemanticMatch))
+        || (empty($result['uploaded_object_families'] ?? []) && ($hasStrongVisualEvidence || $semanticSupportedByVisual));
 }
 
 function getMatchLevel(float $score): string
@@ -977,14 +1041,35 @@ function buildMatchReason(
     float $imaggaScore,
     float $jaccardScore,
     float $categoryScore,
-    array $matchedTags
+    array $matchedTags,
+    array $imageMetrics = []
 ): string {
     $reasons = [];
+    $orbScore = clampPercent((float) ($imageMetrics['orb_score'] ?? 0));
+    $histogramScore = clampPercent((float) ($imageMetrics['histogram_score'] ?? 0));
+    $shapeScore = clampPercent((float) ($imageMetrics['shape_score'] ?? 0));
+    $verifiedMatches = max(0, (int) ($imageMetrics['verified_matches'] ?? 0));
 
     if ($imageScore >= HIGH_CONFIDENCE_IMAGE_THRESHOLD) {
         $reasons[] = 'strong OpenCV visual verification';
     } elseif ($imageScore >= 50.0) {
         $reasons[] = 'moderate visual similarity';
+    }
+
+    if ($orbScore >= 55.0) {
+        $reasons[] = 'ORB keypoints align strongly';
+    }
+
+    if ($histogramScore >= 70.0) {
+        $reasons[] = 'color profile matches closely';
+    }
+
+    if ($shapeScore >= 70.0) {
+        $reasons[] = 'shape silhouette matches closely';
+    }
+
+    if ($verifiedMatches >= 8) {
+        $reasons[] = 'multiple verified feature matches';
     }
 
     if ($imaggaScore >= HIGH_CONFIDENCE_IMAGGA_THRESHOLD) {
@@ -1010,22 +1095,55 @@ function buildMatchReason(
         : 'Potential match based on the available visual and semantic signals.';
 }
 
-function calculateDisplayedSimilarityScore(float $imageScore): float
+function calculateDisplayedSimilarityScore(
+    float $imageScore,
+    float $finalScore = 0.0,
+    float $imaggaScore = 0.0,
+    float $jaccardScore = 0.0,
+    float $categoryScore = 0.0
+): float
 {
-    return clampPercent($imageScore);
+    $imageScore = clampPercent($imageScore);
+    $finalScore = clampPercent($finalScore);
+    $imaggaScore = clampPercent($imaggaScore);
+    $jaccardScore = clampPercent($jaccardScore);
+    $categoryScore = clampPercent($categoryScore);
+
+    if ($finalScore <= 0.0) {
+        return $imageScore;
+    }
+
+    $displayScore = max(
+        $imageScore,
+        ($finalScore * 0.85) + ($imageScore * 0.15)
+    );
+
+    if (
+        $imageScore >= 65.0
+        && $imaggaScore >= 65.0
+        && ($jaccardScore >= 10.0 || $categoryScore >= 100.0)
+    ) {
+        $displayScore = max($displayScore, 80.0);
+    }
+
+    if ($imageScore >= 82.0 && $imaggaScore >= 72.0 && ($jaccardScore >= 15.0 || $categoryScore >= 100.0)) {
+        $displayScore = max($displayScore, 88.0);
+    }
+
+    return clampPercent($displayScore);
 }
 
 function sortImageSearchResults(array &$results): void
 {
     usort($results, static function (array $left, array $right): int {
-        $scoreComparison = ($right['final_score'] <=> $left['final_score']);
-        if ($scoreComparison !== 0) {
-            return $scoreComparison;
-        }
-
         $visualComparison = ($right['visual_score'] <=> $left['visual_score']);
         if ($visualComparison !== 0) {
             return $visualComparison;
+        }
+
+        $scoreComparison = ($right['final_score'] <=> $left['final_score']);
+        if ($scoreComparison !== 0) {
+            return $scoreComparison;
         }
 
         $imaggaComparison = ($right['imagga_score'] <=> $left['imagga_score']);
@@ -1107,7 +1225,11 @@ function applyInferredObjectFamiliesToResults(array $results, array $uploadedObj
 
         $result['final_score'] = round($adjustedFinalScore, 2);
         $result['similarity_percentage'] = round(calculateDisplayedSimilarityScore(
-            clampPercent((float) ($result['visual_score'] ?? $result['image_score'] ?? 0))
+            clampPercent((float) ($result['visual_score'] ?? $result['image_score'] ?? 0)),
+            clampPercent((float) ($result['final_score'] ?? 0)),
+            clampPercent((float) ($result['imagga_score'] ?? 0)),
+            clampPercent((float) ($result['jaccard_score'] ?? 0)),
+            clampPercent((float) ($result['category_score'] ?? 0))
         ), 2);
         $result['match_level'] = getMatchLevel((float) $result['similarity_percentage']);
     }

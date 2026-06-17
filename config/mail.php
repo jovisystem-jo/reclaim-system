@@ -13,6 +13,7 @@ class MailConfig
     private static $lastError = '';
     private static $lastTransport = '';
     private static $lastPreviewId = '';
+    private static $lastResolvedHostname = '';
 
     private static function isProductionEnvironment()
     {
@@ -227,6 +228,7 @@ class MailConfig
         self::$lastError = '';
         self::$lastTransport = '';
         self::$lastPreviewId = '';
+        self::$lastResolvedHostname = '';
     }
 
     private static function previewDirectory()
@@ -401,7 +403,7 @@ class MailConfig
     private static function buildDefaultFromEmail($smtpUsername = '', $transport = 'smtp')
     {
         $configured = trim((string) self::getEnvValue('MAIL_FROM_EMAIL', self::getEnvValue('SMTP_FROM_EMAIL', '')));
-        if ($configured !== '') {
+        if (self::isValidMailbox($configured)) {
             return $configured;
         }
 
@@ -431,6 +433,71 @@ class MailConfig
         return 'noreply@localhost';
     }
 
+    private static function normalizeHostnameCandidate($candidate)
+    {
+        if (!is_string($candidate)) {
+            return '';
+        }
+
+        $candidate = trim($candidate);
+        if ($candidate === '') {
+            return '';
+        }
+
+        $candidate = preg_replace('#^[a-z]+://#i', '', $candidate) ?? $candidate;
+        $candidate = preg_replace('/:\d+$/', '', $candidate) ?? $candidate;
+        $candidate = trim($candidate, "[] \t\n\r\0\x0B");
+
+        if ($candidate === '') {
+            return '';
+        }
+
+        if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+            return '[' . $candidate . ']';
+        }
+
+        if (
+            str_contains($candidate, '.')
+            && filter_var($candidate, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)
+        ) {
+            return strtolower($candidate);
+        }
+
+        return '';
+    }
+
+    private static function resolveHostnameIdentity()
+    {
+        $configuredHostname = trim((string) self::getEnvValue('MAIL_HOSTNAME', ''));
+        $configuredHelo = trim((string) self::getEnvValue('SMTP_HELO_DOMAIN', ''));
+        $appUrl = trim((string) self::getEnvValue('APP_URL', ''));
+        $serverName = trim((string) ($_SERVER['SERVER_NAME'] ?? ''));
+        $httpHost = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        $serverAddress = trim((string) ($_SERVER['SERVER_ADDR'] ?? ''));
+        $systemHostname = function_exists('gethostname') ? (string) gethostname() : '';
+
+        $candidates = [
+            $configuredHostname,
+            $configuredHelo,
+            parse_url($appUrl, PHP_URL_HOST) ?: '',
+            $httpHost,
+            $serverName,
+            $serverAddress,
+            $systemHostname,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $normalized = self::normalizeHostnameCandidate($candidate);
+            if ($normalized !== '') {
+                self::$lastResolvedHostname = $normalized;
+                return $normalized;
+            }
+        }
+
+        self::$lastResolvedHostname = '[127.0.0.1]';
+        return self::$lastResolvedHostname;
+    }
+
     private static function buildReturnPathEmail($fromEmail)
     {
         $configured = trim((string) self::getEnvValue('MAIL_RETURN_PATH_EMAIL', ''));
@@ -452,12 +519,7 @@ class MailConfig
 
     private static function buildHostname()
     {
-        $configured = trim((string) self::getEnvValue('MAIL_HOSTNAME', self::getEnvValue('SMTP_HELO_DOMAIN', '')));
-        if ($configured !== '') {
-            return $configured;
-        }
-
-        return self::detectAppHost();
+        return self::resolveHostnameIdentity();
     }
 
     private static function configureDebugOutput($mailer)
@@ -529,10 +591,6 @@ class MailConfig
                 ];
             }
 
-            $heloDomain = trim((string) ($smtpProfile['helo'] ?? ''));
-            if ($heloDomain !== '') {
-                $mailer->Helo = $heloDomain;
-            }
         }
 
         $fromEmail = self::buildDefaultFromEmail($smtpUsername, $transport);
@@ -544,6 +602,18 @@ class MailConfig
         $hostname = self::buildHostname();
         if ($hostname !== '') {
             $mailer->Hostname = $hostname;
+        }
+
+        if ($mailer->Mailer === 'smtp') {
+            $heloDomain = trim((string) ($smtpProfile['helo'] ?? ''));
+            if ($heloDomain === '') {
+                $heloDomain = $hostname;
+            }
+
+            $heloDomain = self::normalizeHostnameCandidate($heloDomain);
+            if ($heloDomain !== '') {
+                $mailer->Helo = $heloDomain;
+            }
         }
 
         $mailer->setFrom($fromEmail, $fromName);
@@ -716,6 +786,11 @@ class MailConfig
     public static function getLastPreviewId()
     {
         return self::$lastPreviewId;
+    }
+
+    public static function getLastResolvedHostname()
+    {
+        return self::$lastResolvedHostname;
     }
 
     public static function getConfiguredMailer()
