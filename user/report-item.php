@@ -2,14 +2,12 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 requireLogin();
-require_once __DIR__ . '/../includes/notification.php';
-require_once __DIR__ . '/../includes/imagga_similarity.php';
 
 // Determine report type from URL parameter
 $type = isset($_GET['type']) && $_GET['type'] === 'found' ? 'found' : 'lost';
 
 $db = Database::getInstance()->getConnection();
-$notification = new NotificationSystem();
+$notification = null;
 $error = '';
 $success = '';
 
@@ -171,6 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (empty($error)) {
         try {
+            $db->beginTransaction();
+
             // Insert into items table
             $stmt = $db->prepare("
                 INSERT INTO items (title, description, category, brand, color, found_location, delivery_location, date_found, status, image_url, reported_by, user_id, reported_date) 
@@ -180,23 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $location_value = $location_found;
             
             if ($stmt->execute([$title, $description, $category, $brand, $color, $location_value, $delivery_location, $datetime_occurred, $status, $image_url, $_SESSION['userID'], $_SESSION['userID']])) {
-                $itemID = $db->lastInsertId();
-                // Upload to Imagga if image exists
-                if (!empty($image_url)) {
-                    try {
-                        $imaggaSync = syncItemImageToImaggaCollection($db, (int)$itemID, $image_url);
-                        if (!$imaggaSync['success'] && empty($imaggaSync['skipped'])) {
-                            error_log('Imagga item indexing failed for item ' . (int)$itemID . ': ' . ($imaggaSync['error'] ?? 'Unknown error'));
-                        }
-                    } catch (Throwable $e) {
-                        error_log('Imagga item indexing exception for item ' . (int)$itemID . ': ' . $e->getMessage());
-                    }
-                }
-                
-                // Send notification to user
-                $notifTitle = $status == 'lost' ? 'Lost Item Reported' : 'Found Item Reported';
-                $notifMessage = "You have successfully reported a {$status} item: '{$title}'.";
-                $notification->send($_SESSION['userID'], $notifTitle, $notifMessage, 'success');
+                $itemID = (int)$db->lastInsertId();
                 
                 if ($status == 'lost') {
                     $stmt = $db->prepare("INSERT INTO lost_reports (itemID, reporterID) VALUES (?, ?)");
@@ -215,20 +199,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $success .= '<br><strong>Keep at:</strong> ' . htmlspecialchars($delivery_location);
                 }
 
+                $db->commit();
+
+                // Auxiliary integrations should never block a successful item report.
+                if (!empty($image_url)) {
+                    try {
+                        require_once __DIR__ . '/../includes/imagga_similarity.php';
+                        $imaggaSync = syncItemImageToImaggaCollection($db, $itemID, $image_url);
+                        if (!$imaggaSync['success'] && empty($imaggaSync['skipped'])) {
+                            error_log('Imagga item indexing failed for item ' . $itemID . ': ' . ($imaggaSync['error'] ?? 'Unknown error'));
+                        }
+                    } catch (Throwable $e) {
+                        error_log('Imagga item indexing exception for item ' . $itemID . ': ' . $e->getMessage());
+                    }
+                }
+
                 try {
-                    $notification->processAutomaticItemMatches((int) $itemID);
+                    if ($notification === null) {
+                        require_once __DIR__ . '/../includes/notification.php';
+                        $notification = new NotificationSystem();
+                    }
+
+                    $notifTitle = $status == 'lost' ? 'Lost Item Reported' : 'Found Item Reported';
+                    $notifMessage = "You have successfully reported a {$status} item: '{$title}'.";
+                    $notification->send($_SESSION['userID'], $notifTitle, $notifMessage, 'success');
                 } catch (Throwable $e) {
-                    error_log('Automatic match processing failed for reported item ' . (int) $itemID . ': ' . $e->getMessage());
+                    error_log('Report item notification failed for item ' . $itemID . ': ' . $e->getMessage());
+                }
+
+                try {
+                    if ($notification === null) {
+                        require_once __DIR__ . '/../includes/notification.php';
+                        $notification = new NotificationSystem();
+                    }
+
+                    $notification->processAutomaticItemMatches($itemID);
+                } catch (Throwable $e) {
+                    error_log('Automatic match processing failed for reported item ' . $itemID . ': ' . $e->getMessage());
                 }
                 
                 $_POST = [];
             } else {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
                 $error = 'Failed to report item. Please try again.';
             }
         } catch (PDOException $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            $success = '';
             error_log("Report item database error: " . $e->getMessage());
             $error = 'Unable to save item. Please try again.';
         } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            $success = '';
             error_log("Report item unexpected error: " . $e->getMessage());
             $error = 'Something went wrong while reporting the item. Please try again.';
         }

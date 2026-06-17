@@ -4,6 +4,8 @@ require_once __DIR__ . '/functions.php';
 class AutomaticItemMatchService {
     private $db;
     private $pythonCommand;
+    private $imageComparisonUnavailableReason = '';
+    private static $dependencyIssueLogged = false;
 
     public function __construct(PDO $db) {
         $this->db = $db;
@@ -258,7 +260,11 @@ class AutomaticItemMatchService {
         }
 
         if ($this->pythonCommand === null) {
-            error_log('Automatic item matching OpenCV skipped: Python/OpenCV runtime is unavailable.');
+            $this->logDependencyIssueOnce(
+                $this->imageComparisonUnavailableReason !== ''
+                    ? $this->imageComparisonUnavailableReason
+                    : 'Automatic item matching OpenCV skipped: Python/OpenCV runtime is unavailable.'
+            );
             return $defaultMetrics;
         }
 
@@ -351,6 +357,11 @@ class AutomaticItemMatchService {
     }
 
     private function findPythonCommand() {
+        if (!$this->canExecuteShellCommands()) {
+            $this->imageComparisonUnavailableReason = 'Automatic item matching OpenCV skipped: shell execution is unavailable on this server.';
+            return null;
+        }
+
         $configuredPython = trim((string) getenv('PYTHON_PATH'));
 
         $candidates = array_merge(
@@ -358,7 +369,18 @@ class AutomaticItemMatchService {
                 $configuredPython !== '' ? [$configuredPython] : null,
                 ['python'],
                 ['python3'],
+                ['python3.12'],
+                ['python3.11'],
+                ['python3.10'],
+                ['python3.9'],
                 ['py', '-3'],
+                ['/usr/bin/python3'],
+                ['/usr/local/bin/python3'],
+                ['/usr/bin/python'],
+                ['/usr/local/bin/python'],
+                ['/opt/cpanel/ea-python312/root/usr/bin/python3'],
+                ['/opt/cpanel/ea-python311/root/usr/bin/python3'],
+                ['/opt/cpanel/ea-python39/root/usr/bin/python3'],
                 ['C:\\Python39\\python.exe'],
                 ['C:\\Python310\\python.exe'],
                 ['C:\\Python311\\python.exe'],
@@ -371,18 +393,12 @@ class AutomaticItemMatchService {
         );
 
         foreach ($candidates as $candidate) {
-            try {
-                $result = $this->runCommand(array_merge($candidate, ['--version']));
-            } catch (Throwable $exception) {
-                continue;
-            }
-
-            $combinedOutput = trim(((string) ($result['stdout'] ?? '')) . ' ' . ((string) ($result['stderr'] ?? '')));
-            if ((int) ($result['exit_code'] ?? 1) === 0 && stripos($combinedOutput, 'Python') !== false) {
+            if ($this->pythonSupportsImageComparison($candidate)) {
                 return $candidate;
             }
         }
 
+        $this->imageComparisonUnavailableReason = 'Automatic item matching OpenCV skipped: Python with OpenCV and NumPy could not be found.';
         return null;
     }
 
@@ -418,7 +434,33 @@ class AutomaticItemMatchService {
         return $commands;
     }
 
+    private function pythonSupportsImageComparison(array $pythonCommand) {
+        try {
+            $result = $this->runCommand(
+                array_merge($pythonCommand, ['-c', 'import cv2, numpy; print(12345)'])
+            );
+        } catch (Throwable $exception) {
+            return false;
+        }
+
+        $combinedOutput = trim(((string) ($result['stdout'] ?? '')) . ' ' . ((string) ($result['stderr'] ?? '')));
+
+        return (int) ($result['exit_code'] ?? 1) === 0
+            && strpos($combinedOutput, '12345') !== false;
+    }
+
+    private function canExecuteShellCommands() {
+        return function_exists('proc_open')
+            && function_exists('proc_close')
+            && function_exists('stream_get_contents')
+            && function_exists('escapeshellarg');
+    }
+
     private function runCommand(array $commandParts) {
+        if (!$this->canExecuteShellCommands()) {
+            throw new RuntimeException('Shell execution is unavailable.');
+        }
+
         $command = implode(' ', array_map(function ($part) {
             return escapeshellarg((string) $part);
         }, $commandParts));
@@ -447,6 +489,17 @@ class AutomaticItemMatchService {
             'stderr' => (string) $stderr,
             'exit_code' => (int) $exitCode,
         ];
+    }
+
+    private function logDependencyIssueOnce($message) {
+        $message = trim((string) $message);
+
+        if ($message === '' || self::$dependencyIssueLogged) {
+            return;
+        }
+
+        self::$dependencyIssueLogged = true;
+        error_log($message);
     }
 
     private function buildMatchReason(array $sharedFamilies, array $sharedTokens, $textScorePercent, $imageScorePercent, $combinedScorePercent) {

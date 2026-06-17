@@ -10,6 +10,108 @@ function getImaggaSimilarityConfig() {
     ];
 }
 
+function imaggaFailureResult($error, array $extra = []) {
+    return array_merge([
+        'success' => false,
+        'http_code' => 0,
+        'error' => (string)$error,
+    ], $extra);
+}
+
+function imaggaDependenciesAvailable() {
+    static $status = null;
+
+    if ($status !== null) {
+        return $status;
+    }
+
+    $requiredFunctions = [
+        'curl_init',
+        'curl_setopt',
+        'curl_exec',
+        'curl_close',
+        'curl_getinfo',
+        'curl_error',
+        'curl_file_create',
+    ];
+
+    foreach ($requiredFunctions as $functionName) {
+        if (!function_exists($functionName)) {
+            $status = [
+                'available' => false,
+                'error' => 'Imagga integration is unavailable because PHP cURL support is not enabled on this server.',
+            ];
+            return $status;
+        }
+    }
+
+    $status = [
+        'available' => true,
+        'error' => '',
+    ];
+
+    return $status;
+}
+
+function imaggaResolveImageMimeType($imagePath) {
+    if (function_exists('mime_content_type')) {
+        $mimeType = @mime_content_type($imagePath);
+        if (is_string($mimeType) && trim($mimeType) !== '') {
+            return $mimeType;
+        }
+    }
+
+    if (function_exists('finfo_open') && function_exists('finfo_file') && function_exists('finfo_close')) {
+        $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+        if ($finfo) {
+            $mimeType = @finfo_file($finfo, $imagePath);
+            @finfo_close($finfo);
+
+            if (is_string($mimeType) && trim($mimeType) !== '') {
+                return $mimeType;
+            }
+        }
+    }
+
+    $extension = strtolower((string)pathinfo($imagePath, PATHINFO_EXTENSION));
+    $mimeTypesByExtension = [
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+    ];
+
+    return $mimeTypesByExtension[$extension] ?? 'application/octet-stream';
+}
+
+function imaggaCreateMultipartImageField($imagePath) {
+    if (!is_file($imagePath)) {
+        return imaggaFailureResult('Item image file not found for Imagga processing.');
+    }
+
+    $dependencyStatus = imaggaDependenciesAvailable();
+    if (empty($dependencyStatus['available'])) {
+        return imaggaFailureResult($dependencyStatus['error'], ['skipped' => true]);
+    }
+
+    try {
+        return [
+            'success' => true,
+            'file' => curl_file_create(
+                $imagePath,
+                imaggaResolveImageMimeType($imagePath),
+                basename($imagePath)
+            ),
+        ];
+    } catch (Throwable $e) {
+        return imaggaFailureResult(
+            'Unable to prepare the uploaded image for Imagga processing.',
+            ['skipped' => true]
+        );
+    }
+}
+
 function imaggaApiSuccess(array $payload) {
     $statusType = strtolower((string)($payload['status']['type'] ?? $payload['result']['status']['type'] ?? ''));
     return $statusType === '' || $statusType === 'success';
@@ -17,11 +119,12 @@ function imaggaApiSuccess(array $payload) {
 
 function imaggaMultipartRequest($url, $apiKey, $apiSecret, array $fields, $method = 'POST', array $queryParams = []) {
     if ($apiKey === '' || $apiSecret === '') {
-        return [
-            'success' => false,
-            'http_code' => 0,
-            'error' => 'Imagga API credentials not configured.',
-        ];
+        return imaggaFailureResult('Imagga API credentials not configured.', ['skipped' => true]);
+    }
+
+    $dependencyStatus = imaggaDependenciesAvailable();
+    if (empty($dependencyStatus['available'])) {
+        return imaggaFailureResult($dependencyStatus['error'], ['skipped' => true]);
     }
 
     if (!empty($queryParams)) {
@@ -29,6 +132,10 @@ function imaggaMultipartRequest($url, $apiKey, $apiSecret, array $fields, $metho
     }
 
     $ch = curl_init();
+    if ($ch === false) {
+        return imaggaFailureResult('Unable to initialize the Imagga request.', ['skipped' => true]);
+    }
+
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
@@ -48,30 +155,28 @@ function imaggaMultipartRequest($url, $apiKey, $apiSecret, array $fields, $metho
     curl_close($ch);
 
     if ($rawResponse === false) {
-        return [
-            'success' => false,
-            'http_code' => $httpCode,
-            'error' => $curlError !== '' ? $curlError : 'Imagga request failed.',
-        ];
+        return imaggaFailureResult(
+            $curlError !== '' ? $curlError : 'Imagga request failed.',
+            ['http_code' => $httpCode]
+        );
     }
 
     $decoded = json_decode($rawResponse, true);
     if (!is_array($decoded)) {
-        return [
-            'success' => false,
+        return imaggaFailureResult('Invalid JSON response from Imagga.', [
             'http_code' => $httpCode,
-            'error' => 'Invalid JSON response from Imagga.',
             'raw_response' => $rawResponse,
-        ];
+        ]);
     }
 
     if ($httpCode < 200 || $httpCode >= 300 || !imaggaApiSuccess($decoded)) {
-        return [
-            'success' => false,
-            'http_code' => $httpCode,
-            'error' => (string)($decoded['status']['text'] ?? $decoded['result']['status']['text'] ?? 'Imagga request failed.'),
-            'response' => $decoded,
-        ];
+        return imaggaFailureResult(
+            (string)($decoded['status']['text'] ?? $decoded['result']['status']['text'] ?? 'Imagga request failed.'),
+            [
+                'http_code' => $httpCode,
+                'response' => $decoded,
+            ]
+        );
     }
 
     return [
@@ -100,14 +205,16 @@ function addImageToImaggaCollection($imagePath, $collectionId, $apiKey, $apiSecr
     $imageId = $imageId ?: ('item-' . bin2hex(random_bytes(8)));
 
     if (!is_file($imagePath)) {
-        return [
-            'success' => false,
-            'error' => 'Item image file not found for Imagga indexing.',
-        ];
+        return imaggaFailureResult('Item image file not found for Imagga indexing.');
+    }
+
+    $imageField = imaggaCreateMultipartImageField($imagePath);
+    if (!$imageField['success']) {
+        return $imageField;
     }
 
     $payload = [
-        'image' => curl_file_create($imagePath, mime_content_type($imagePath) ?: 'image/jpeg', basename($imagePath)),
+        'image' => $imageField['file'],
         'save_index' => $collectionId,
         'save_id' => $imageId,
     ];
@@ -139,18 +246,19 @@ function searchSimilarImages($imagePath, $collectionId, $apiKey, $apiSecret) {
     $config = getImaggaSimilarityConfig();
 
     if (!is_file($imagePath)) {
-        return [
-            'success' => false,
-            'error' => 'Search image file not found.',
-        ];
+        return imaggaFailureResult('Search image file not found.');
     }
 
-    $multipartImage = curl_file_create($imagePath, mime_content_type($imagePath) ?: 'image/jpeg', basename($imagePath));
+    $multipartImage = imaggaCreateMultipartImageField($imagePath);
+    if (!$multipartImage['success']) {
+        return $multipartImage;
+    }
+
     $preferredResponse = imaggaMultipartRequest(
         'https://api.imagga.com/v2/images-similarity/' . rawurlencode($collectionId),
         $apiKey,
         $apiSecret,
-        ['image' => $multipartImage],
+        ['image' => $multipartImage['file']],
         'POST',
         ['count' => $config['max_results']]
     );
@@ -163,11 +271,16 @@ function searchSimilarImages($imagePath, $collectionId, $apiKey, $apiSecret) {
         ];
     }
 
+    $fallbackImage = imaggaCreateMultipartImageField($imagePath);
+    if (!$fallbackImage['success']) {
+        return $fallbackImage;
+    }
+
     $fallbackResponse = imaggaMultipartRequest(
         'https://api.imagga.com/v2/similar-images/categories/' . rawurlencode($config['categorizer_id']) . '/' . rawurlencode($collectionId),
         $apiKey,
         $apiSecret,
-        ['image' => curl_file_create($imagePath, mime_content_type($imagePath) ?: 'image/jpeg', basename($imagePath))],
+        ['image' => $fallbackImage['file']],
         'POST',
         ['count' => $config['max_results']]
     );
@@ -381,8 +494,14 @@ function findSimilarItemsWithImaggaForImage(PDO $db, $imagePath, array $options 
     if ($config['api_key'] === '' || $config['api_secret'] === '' || $config['collection_id'] === '') {
         return [
             'success' => false,
+            'skipped' => true,
             'error' => 'Imagga visual similarity is not configured.',
         ];
+    }
+
+    $dependencyStatus = imaggaDependenciesAvailable();
+    if (empty($dependencyStatus['available'])) {
+        return imaggaFailureResult($dependencyStatus['error'], ['skipped' => true]);
     }
 
     $similarityResponse = searchSimilarImages($imagePath, $config['collection_id'], $config['api_key'], $config['api_secret']);
@@ -399,7 +518,13 @@ function findSimilarItemsWithImaggaForImage(PDO $db, $imagePath, array $options 
         ];
     }
 
-    $matches = mapImaggaMatchesToItems($db, $entries, $options);
+    try {
+        $matches = mapImaggaMatchesToItems($db, $entries, $options);
+    } catch (PDOException $e) {
+        error_log('Imagga local match mapping failed: ' . $e->getMessage());
+        return imaggaFailureResult('Unable to map Imagga results to local items.');
+    }
+
     if (empty($matches['matched_items'])) {
         return [
             'success' => false,
@@ -449,8 +574,6 @@ function findSimilarItemsWithImaggaForItem(PDO $db, array $item, array $options 
 }
 
 function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
-    ensureItemsImaggaColumn($db);
-
     $config = getImaggaSimilarityConfig();
     if ($config['api_key'] === '' || $config['api_secret'] === '' || $config['collection_id'] === '') {
         return [
@@ -458,6 +581,11 @@ function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
             'skipped' => true,
             'error' => 'Imagga visual similarity is not configured.',
         ];
+    }
+
+    $dependencyStatus = imaggaDependenciesAvailable();
+    if (empty($dependencyStatus['available'])) {
+        return imaggaFailureResult($dependencyStatus['error'], ['skipped' => true]);
     }
 
     if ($relativeImagePath === null || $relativeImagePath === '') {
@@ -468,9 +596,16 @@ function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
         ];
     }
 
-    $stmt = $db->prepare('SELECT imagga_image_id FROM items WHERE item_id = ?');
-    $stmt->execute([(int)$itemId]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    try {
+        ensureItemsImaggaColumn($db);
+
+        $stmt = $db->prepare('SELECT imagga_image_id FROM items WHERE item_id = ?');
+        $stmt->execute([(int)$itemId]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log('Imagga column preparation failed for item ' . (int)$itemId . ': ' . $e->getMessage());
+        return imaggaFailureResult('Unable to prepare local item image indexing.');
+    }
 
     $imageId = $existing['imagga_image_id'] ?? '';
     if ($imageId === '') {
@@ -492,8 +627,13 @@ function syncItemImageToImaggaCollection(PDO $db, $itemId, $relativeImagePath) {
     }
 
     $storedImageId = (string)($indexResult['image_id'] ?? $imageId);
-    $updateStmt = $db->prepare('UPDATE items SET imagga_image_id = ? WHERE item_id = ?');
-    $updateStmt->execute([$storedImageId, (int)$itemId]);
+    try {
+        $updateStmt = $db->prepare('UPDATE items SET imagga_image_id = ? WHERE item_id = ?');
+        $updateStmt->execute([$storedImageId, (int)$itemId]);
+    } catch (PDOException $e) {
+        error_log('Imagga image ID update failed for item ' . (int)$itemId . ': ' . $e->getMessage());
+        return imaggaFailureResult('Unable to save the Imagga image index reference.');
+    }
 
     return [
         'success' => true,

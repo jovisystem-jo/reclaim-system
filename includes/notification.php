@@ -2,8 +2,6 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/mail.php';
 require_once __DIR__ . '/functions.php';
-require_once __DIR__ . '/imagga_similarity.php';
-require_once __DIR__ . '/item_matcher.php';
 
 class NotificationSystem {
     private $db;
@@ -278,6 +276,8 @@ class NotificationSystem {
      * Compare a newly reported item against open opposite-status items and notify the matched user.
      */
     public function processAutomaticItemMatches($itemId) {
+        require_once __DIR__ . '/item_matcher.php';
+
         $matcher = new AutomaticItemMatchService($this->db);
         $matches = $matcher->findMatchesForItem((int) $itemId);
 
@@ -721,6 +721,8 @@ class NotificationSystem {
      * Pull Imagga similarity scores for candidate found items when the lost report has an image.
      */
     private function getImaggaScoresForLostItem(array $lostItem, $limit = 15) {
+        require_once __DIR__ . '/imagga_similarity.php';
+
         try {
             $imaggaMatches = findSimilarItemsWithImaggaForItem($this->db, $lostItem, [
                 'statuses' => ['found'],
