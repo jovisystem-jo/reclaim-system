@@ -41,8 +41,10 @@ const REGISTER_OTP_SESSION_KEY = 'pending_registration_otp';
 const REGISTER_OTP_EXPIRY_SECONDS = 300;
 const REGISTER_EMAIL_VERIFICATION_SESSION_KEY = 'register_email_verification';
 const REGISTER_EMAIL_VERIFICATION_EXPIRY_SECONDS = 300;
-$isAjaxEmailVerificationRequest = $_SERVER['REQUEST_METHOD'] === 'POST'
-    && ($_POST['form_action'] ?? '') === 'send_email_verification_only'
+const REGISTER_PHONE_VERIFICATION_SESSION_KEY = 'register_phone_verification';
+const REGISTER_PHONE_VERIFICATION_EXPIRY_SECONDS = 300;
+$isAjaxVerificationRequest = $_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array(($_POST['form_action'] ?? ''), ['send_email_verification_only', 'send_phone_verification_only'], true)
     && strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
 
 function register_json_response(array $payload, int $statusCode = 200) {
@@ -64,7 +66,7 @@ function register_log_issue($message) {
     @file_put_contents($logDirectory . '/register.log', $message . PHP_EOL, FILE_APPEND);
 }
 
-if ($isAjaxEmailVerificationRequest) {
+if ($isAjaxVerificationRequest) {
     register_shutdown_function(static function (): void {
         $error = error_get_last();
         if (!is_array($error)) {
@@ -119,12 +121,21 @@ function register_email_verification_data() {
     return is_array($pending) ? $pending : null;
 }
 
+function register_phone_verification_data() {
+    $pending = $_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY] ?? null;
+    return is_array($pending) ? $pending : null;
+}
+
 function clear_register_pending_data() {
     unset($_SESSION[REGISTER_OTP_SESSION_KEY]);
 }
 
 function clear_register_email_verification_data() {
     unset($_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY]);
+}
+
+function clear_register_phone_verification_data() {
+    unset($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]);
 }
 
 function normalize_register_input(array $source) {
@@ -203,6 +214,83 @@ function mask_register_email($email) {
     return $visible . str_repeat('*', max(strlen($local) - strlen($visible), 1)) . '@' . $domain;
 }
 
+function register_env_flag($name, $default = false) {
+    $value = getenv($name);
+    if ($value === false || $value === null || $value === '') {
+        return $default;
+    }
+
+    $normalized = strtolower(trim((string) $value));
+    if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+        return true;
+    }
+
+    if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+        return false;
+    }
+
+    return $default;
+}
+
+function register_allow_sms_code_preview() {
+    return register_env_flag('SMS_EXPOSE_PREVIEW_CODE', !app_is_production());
+}
+
+function normalize_register_phone($phone) {
+    $phone = trim((string) $phone);
+    if ($phone === '') {
+        return '';
+    }
+
+    $normalized = preg_replace('/[^\d+]/', '', $phone) ?? '';
+    $normalized = preg_replace('/(?!^)\+/', '', $normalized) ?? '';
+
+    if (strpos($normalized, '00') === 0) {
+        $normalized = '+' . substr($normalized, 2);
+    }
+
+    if (strpos($normalized, '+') === 0) {
+        $digits = preg_replace('/\D+/', '', substr($normalized, 1)) ?? '';
+        if ($digits === '' || strlen($digits) < 8 || strlen($digits) > 15) {
+            return '';
+        }
+
+        return '+' . $digits;
+    }
+
+    $digits = preg_replace('/\D+/', '', $normalized) ?? '';
+    if ($digits === '') {
+        return '';
+    }
+
+    if (strpos($digits, '60') === 0) {
+        $digits = $digits;
+    } elseif (strpos($digits, '0') === 0) {
+        $digits = '60' . substr($digits, 1);
+    } elseif (preg_match('/^1\d{8,9}$/', $digits)) {
+        $digits = '60' . $digits;
+    }
+
+    if (strlen($digits) < 8 || strlen($digits) > 15) {
+        return '';
+    }
+
+    return '+' . $digits;
+}
+
+function mask_register_phone($phone) {
+    $normalized = normalize_register_phone($phone);
+    if ($normalized === '') {
+        return trim((string) $phone);
+    }
+
+    $prefix = substr($normalized, 0, 5);
+    $suffix = substr($normalized, -3);
+    $middleLength = max(strlen($normalized) - strlen($prefix) - strlen($suffix), 3);
+
+    return $prefix . str_repeat('*', $middleLength) . $suffix;
+}
+
 function send_register_otp_email($email, $name, $otpCode) {
     try {
         require_once 'config/mail.php';
@@ -237,6 +325,68 @@ function send_register_otp_email($email, $name, $otpCode) {
     }
 }
 
+function send_register_otp_sms($phone, $name, $otpCode) {
+    try {
+        require_once 'config/sms.php';
+
+        $safeName = trim((string) $name);
+        $message = 'Reclaim System verification code: ' . $otpCode . '. ';
+        if ($safeName !== '') {
+            $message .= 'Hi ' . $safeName . ', ';
+        }
+        $message .= 'use this code within 5 minutes to verify your phone number.';
+
+        $sent = SmsConfig::sendMessage($phone, $message);
+        $transport = SmsConfig::getLastTransport();
+        $previewAllowed = register_allow_sms_code_preview();
+        $usedPreviewTransport = $sent && $transport === 'preview';
+        $shouldExposeCode = $previewAllowed && ($usedPreviewTransport || !$sent);
+
+        if ($usedPreviewTransport && !$previewAllowed) {
+            register_log_issue('Registration OTP SMS used preview transport for ' . $phone . ' but preview exposure is disabled.');
+            return [
+                'success' => false,
+                'show_preview_code' => false,
+                'temporary_code' => '',
+                'transport' => $transport,
+                'error' => 'SMS delivery is not configured right now. Please contact the administrator.',
+            ];
+        }
+
+        if (!$sent && !$previewAllowed) {
+            register_log_issue('Registration OTP SMS failed for ' . $phone . ': ' . SmsConfig::getLastError());
+        }
+
+        return [
+            'success' => $sent || $shouldExposeCode,
+            'show_preview_code' => $shouldExposeCode,
+            'temporary_code' => $shouldExposeCode ? $otpCode : '',
+            'transport' => $transport,
+            'error' => SmsConfig::getLastError(),
+        ];
+    } catch (Throwable $exception) {
+        register_log_issue('Registration OTP SMS crashed for ' . $phone . ': ' . $exception->getMessage());
+
+        if (!register_allow_sms_code_preview()) {
+            return [
+                'success' => false,
+                'show_preview_code' => false,
+                'temporary_code' => '',
+                'transport' => '',
+                'error' => $exception->getMessage(),
+            ];
+        }
+
+        return [
+            'success' => true,
+            'show_preview_code' => true,
+            'temporary_code' => $otpCode,
+            'transport' => '',
+            'error' => $exception->getMessage(),
+        ];
+    }
+}
+
 function stage_register_email_verification($email, $otpCode, array $draft = []) {
     $_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY] = [
         'email' => $email,
@@ -247,6 +397,18 @@ function stage_register_email_verification($email, $otpCode, array $draft = []) 
     ];
 
     return $_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY];
+}
+
+function stage_register_phone_verification($phone, $otpCode, array $draft = []) {
+    $_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY] = [
+        'phone' => $phone,
+        'otp_hash' => hash('sha256', $otpCode),
+        'expires_at' => time() + REGISTER_PHONE_VERIFICATION_EXPIRY_SECONDS,
+        'verified_at' => null,
+        'draft' => register_form_draft(array_merge($draft, ['phone' => $phone])),
+    ];
+
+    return $_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY];
 }
 
 function register_email_is_verified($email) {
@@ -267,6 +429,27 @@ function mark_register_email_verified() {
     unset($_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY]['expires_at']);
 }
 
+function register_phone_is_verified($phone) {
+    $verification = register_phone_verification_data();
+    $normalizedPhone = normalize_register_phone($phone);
+
+    return is_array($verification)
+        && !empty($verification['verified_at'])
+        && isset($verification['phone'])
+        && $normalizedPhone !== ''
+        && normalize_register_phone((string) $verification['phone']) === $normalizedPhone;
+}
+
+function mark_register_phone_verified() {
+    if (!isset($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]) || !is_array($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY])) {
+        return;
+    }
+
+    $_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]['verified_at'] = time();
+    unset($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]['otp_hash']);
+    unset($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]['expires_at']);
+}
+
 function update_register_email_verification_draft(array $draft) {
     if (!isset($_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY]) || !is_array($_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY])) {
         return;
@@ -276,6 +459,21 @@ function update_register_email_verification_draft(array $draft) {
 
     if (!empty($draft['email'])) {
         $_SESSION[REGISTER_EMAIL_VERIFICATION_SESSION_KEY]['email'] = trim((string) $draft['email']);
+    }
+}
+
+function update_register_phone_verification_draft(array $draft) {
+    if (!isset($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]) || !is_array($_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY])) {
+        return;
+    }
+
+    $_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]['draft'] = register_form_draft($draft);
+
+    if (!empty($draft['phone'])) {
+        $normalizedPhone = normalize_register_phone($draft['phone']);
+        if ($normalizedPhone !== '') {
+            $_SESSION[REGISTER_PHONE_VERIFICATION_SESSION_KEY]['phone'] = $normalizedPhone;
+        }
     }
 }
 
@@ -299,6 +497,10 @@ function stage_register_pending_data(array $input, $role, $passwordHash, $otpCod
 
 function register_development_otp_message($otpCode) {
     return 'Email delivery is unavailable in development mode. Use the temporary verification code below.';
+}
+
+function register_sms_preview_message($otpCode) {
+    return 'SMS delivery preview is active. Use the temporary verification code below.';
 }
 
 function users_table_has_column(PDO $db, $columnName) {
@@ -330,6 +532,11 @@ function create_verified_user(PDO $db, array $registrationData) {
 
     if (users_table_has_column($db, 'email_verified_at')) {
         $columns[] = 'email_verified_at';
+        $values[] = date('Y-m-d H:i:s');
+    }
+
+    if (users_table_has_column($db, 'phone_verified_at') && !empty($registrationData['phone'])) {
+        $columns[] = 'phone_verified_at';
         $values[] = date('Y-m-d H:i:s');
     }
 
@@ -392,11 +599,13 @@ function stage_register_success_notice(array $registrationData) {
 $formData = register_form_defaults();
 $pendingRegistration = register_pending_data();
 $emailVerificationSession = register_email_verification_data();
+$phoneVerificationSession = register_phone_verification_data();
 $showVerificationModal = false;
 $verificationError = '';
 $verificationSuccess = '';
 $verificationSuccessType = 'success';
-$verificationEmail = '';
+$verificationTarget = 'email';
+$verificationDestination = '';
 $developmentVerificationCode = '';
 
 if ($emailVerificationSession && empty($emailVerificationSession['verified_at']) && (($emailVerificationSession['expires_at'] ?? 0) < time())) {
@@ -404,12 +613,19 @@ if ($emailVerificationSession && empty($emailVerificationSession['verified_at'])
     $emailVerificationSession = null;
 }
 
+if ($phoneVerificationSession && empty($phoneVerificationSession['verified_at']) && (($phoneVerificationSession['expires_at'] ?? 0) < time())) {
+    clear_register_phone_verification_data();
+    $phoneVerificationSession = null;
+}
+
 // A normal page refresh should start from a clean registration form.
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' && ($pendingRegistration || $emailVerificationSession)) {
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && ($pendingRegistration || $emailVerificationSession || $phoneVerificationSession)) {
     clear_register_pending_data();
     clear_register_email_verification_data();
+    clear_register_phone_verification_data();
     $pendingRegistration = null;
     $emailVerificationSession = null;
+    $phoneVerificationSession = null;
 }
 
 if ($pendingRegistration) {
@@ -428,7 +644,8 @@ if ($pendingRegistration) {
             'redirect' => $pendingRegistration['redirect'] ?? '',
         ]);
         $showVerificationModal = true;
-        $verificationEmail = mask_register_email($pendingRegistration['email'] ?? '');
+        $verificationTarget = 'email';
+        $verificationDestination = mask_register_email($pendingRegistration['email'] ?? '');
     }
 }
 
@@ -436,15 +653,23 @@ if ($emailVerificationSession && !$pendingRegistration) {
     $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
 }
 
+if ($phoneVerificationSession && !$pendingRegistration) {
+    $formData = merge_register_form_draft($formData, $phoneVerificationSession['draft'] ?? []);
+}
+
 $emailIsVerified = register_email_is_verified($formData['email']);
+$phoneIsVerified = register_phone_is_verified($formData['phone']);
 $verificationModalIsRegistrationFlow = $pendingRegistration !== null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $formAction = $_POST['form_action'] ?? 'start_registration';
-        $isAjaxEmailVerification = $isAjaxEmailVerificationRequest;
+        $isAjaxVerification = $isAjaxVerificationRequest;
+        $requestedVerificationTarget = in_array(($_POST['verification_target'] ?? ''), ['email', 'phone'], true)
+            ? (string) $_POST['verification_target']
+            : 'email';
 
-        if ($isAjaxEmailVerification) {
+        if ($isAjaxVerification) {
             if (!verify_csrf_token(request_csrf_token())) {
                 register_json_response([
                     'success' => false,
@@ -458,37 +683,158 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db = Database::getInstance()->getConnection();
 
         if ($formAction === 'verify_otp') {
-        $pendingRegistration = register_pending_data();
-        $emailVerificationSession = register_email_verification_data();
+            $pendingRegistration = register_pending_data();
+            $emailVerificationSession = register_email_verification_data();
+            $phoneVerificationSession = register_phone_verification_data();
 
-        if ($pendingRegistration) {
-            if (($pendingRegistration['expires_at'] ?? 0) < time()) {
-                clear_register_pending_data();
-                $error = 'Verification code expired. Please register again.';
-            } else {
-                $submittedCode = trim($_POST['verification_code'] ?? '');
-                $showVerificationModal = true;
-                $verificationEmail = mask_register_email($pendingRegistration['email'] ?? '');
-                $formData = array_merge($formData, [
-                    'name' => $pendingRegistration['name'] ?? '',
-                    'email' => $pendingRegistration['email'] ?? '',
-                    'username' => $pendingRegistration['username'] ?? '',
-                    'student_staff_id' => $pendingRegistration['student_staff_id'] ?? '',
-                    'department' => $pendingRegistration['department'] ?? '',
-                    'phone' => $pendingRegistration['phone'] ?? '',
-                    'role' => $pendingRegistration['role'] ?? 'student',
-                    'redirect' => $pendingRegistration['redirect'] ?? '',
-                ]);
-
-                if (empty($pendingRegistration['password_hash']) || !is_string($pendingRegistration['password_hash'])) {
+            if ($pendingRegistration) {
+                if (($pendingRegistration['expires_at'] ?? 0) < time()) {
                     clear_register_pending_data();
-                    $verificationError = 'Verification session is incomplete. Please register again.';
-                    $showVerificationModal = false;
-                } elseif (!preg_match('/^\d{6}$/', $submittedCode)) {
-                    $verificationError = 'Please enter the 6-digit verification code.';
-                } elseif (!hash_equals($pendingRegistration['otp_hash'] ?? '', hash('sha256', $submittedCode))) {
-                    $verificationError = 'Incorrect verification code. Please try again.';
+                    $error = 'Verification code expired. Please register again.';
                 } else {
+                    $submittedCode = trim((string) ($_POST['verification_code'] ?? ''));
+                    $showVerificationModal = true;
+                    $verificationTarget = 'email';
+                    $verificationDestination = mask_register_email($pendingRegistration['email'] ?? '');
+                    $formData = array_merge($formData, [
+                        'name' => $pendingRegistration['name'] ?? '',
+                        'email' => $pendingRegistration['email'] ?? '',
+                        'username' => $pendingRegistration['username'] ?? '',
+                        'student_staff_id' => $pendingRegistration['student_staff_id'] ?? '',
+                        'department' => $pendingRegistration['department'] ?? '',
+                        'phone' => $pendingRegistration['phone'] ?? '',
+                        'role' => $pendingRegistration['role'] ?? 'student',
+                        'redirect' => $pendingRegistration['redirect'] ?? '',
+                    ]);
+
+                    if (empty($pendingRegistration['password_hash']) || !is_string($pendingRegistration['password_hash'])) {
+                        clear_register_pending_data();
+                        $verificationError = 'Verification session is incomplete. Please register again.';
+                        $showVerificationModal = false;
+                    } elseif (!preg_match('/^\d{6}$/', $submittedCode)) {
+                        $verificationError = 'Please enter the 6-digit verification code.';
+                    } elseif (!hash_equals($pendingRegistration['otp_hash'] ?? '', hash('sha256', $submittedCode))) {
+                        $verificationError = 'Incorrect verification code. Please try again.';
+                    } else {
+                        $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE email = ?');
+                        $stmt->execute([$pendingRegistration['email']]);
+                        if ($stmt->fetchColumn() > 0) {
+                            clear_register_pending_data();
+                            $error = 'Email already registered. Please login instead.';
+                            $showVerificationModal = false;
+                        } else {
+                            $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE username = ?');
+                            $stmt->execute([$pendingRegistration['username']]);
+                            if ($stmt->fetchColumn() > 0) {
+                                clear_register_pending_data();
+                                $error = 'Username already taken. Please register again with a different username.';
+                                $showVerificationModal = false;
+                            } else {
+                                $newUserId = create_verified_user($db, $pendingRegistration);
+                                if ($newUserId) {
+                                    send_register_success_notification($newUserId, $pendingRegistration);
+                                    stage_register_success_notice($pendingRegistration);
+                                    clear_register_pending_data();
+                                    clear_register_email_verification_data();
+                                    clear_register_phone_verification_data();
+                                    session_regenerate_id(true);
+                                    $loginUrl = 'login.php';
+                                    $redirectTarget = $pendingRegistration['redirect'] ?? $redirect;
+                                    if ($redirectTarget !== '') {
+                                        $loginUrl .= '?redirect=' . urlencode($redirectTarget);
+                                    }
+                                    header('Location: ' . $loginUrl);
+                                    exit();
+                                }
+
+                                $verificationError = 'Registration failed. Please try again.';
+                            }
+                        }
+                    }
+                }
+            } elseif ($requestedVerificationTarget === 'phone') {
+                if (!$phoneVerificationSession) {
+                    $error = 'Verification session expired. Please verify your phone number again.';
+                } elseif (($phoneVerificationSession['expires_at'] ?? 0) < time()) {
+                    clear_register_phone_verification_data();
+                    $error = 'Verification code expired. Please verify your phone number again.';
+                } else {
+                    $submittedCode = trim((string) ($_POST['verification_code'] ?? ''));
+                    $showVerificationModal = true;
+                    $verificationTarget = 'phone';
+                    $verificationDestination = mask_register_phone($phoneVerificationSession['phone'] ?? '');
+                    $formData = merge_register_form_draft($formData, $phoneVerificationSession['draft'] ?? []);
+                    $formData['phone'] = $phoneVerificationSession['phone'] ?? $formData['phone'];
+
+                    if (!preg_match('/^\d{6}$/', $submittedCode)) {
+                        $verificationError = 'Please enter the 6-digit verification code.';
+                    } elseif (!hash_equals($phoneVerificationSession['otp_hash'] ?? '', hash('sha256', $submittedCode))) {
+                        $verificationError = 'Incorrect verification code. Please try again.';
+                    } else {
+                        mark_register_phone_verified();
+                        $phoneVerificationSession = register_phone_verification_data();
+                        $formData = merge_register_form_draft($formData, $phoneVerificationSession['draft'] ?? []);
+                        $formData['phone'] = $phoneVerificationSession['phone'] ?? $formData['phone'];
+                        $success = 'Phone number verified successfully. You can continue with registration.';
+                        $showVerificationModal = false;
+                        $verificationError = '';
+                        $verificationSuccess = '';
+                    }
+                }
+            } elseif ($emailVerificationSession) {
+                if (($emailVerificationSession['expires_at'] ?? 0) < time()) {
+                    clear_register_email_verification_data();
+                    $error = 'Verification code expired. Please verify your email again.';
+                } else {
+                    $submittedCode = trim((string) ($_POST['verification_code'] ?? ''));
+                    $showVerificationModal = true;
+                    $verificationTarget = 'email';
+                    $verificationDestination = mask_register_email($emailVerificationSession['email'] ?? '');
+                    $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
+                    $formData['email'] = $emailVerificationSession['email'] ?? $formData['email'];
+
+                    if (!preg_match('/^\d{6}$/', $submittedCode)) {
+                        $verificationError = 'Please enter the 6-digit verification code.';
+                    } elseif (!hash_equals($emailVerificationSession['otp_hash'] ?? '', hash('sha256', $submittedCode))) {
+                        $verificationError = 'Incorrect verification code. Please try again.';
+                    } else {
+                        mark_register_email_verified();
+                        $emailVerificationSession = register_email_verification_data();
+                        $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
+                        $formData['email'] = $emailVerificationSession['email'] ?? $formData['email'];
+                        $success = 'Email verified successfully. You can continue with registration.';
+                        $showVerificationModal = false;
+                        $verificationError = '';
+                        $verificationSuccess = '';
+                    }
+                }
+            } else {
+                $error = 'Verification session expired. Please register again.';
+            }
+        } elseif ($formAction === 'resend_otp') {
+            $pendingRegistration = register_pending_data();
+            $emailVerificationSession = register_email_verification_data();
+            $phoneVerificationSession = register_phone_verification_data();
+
+            if ($pendingRegistration) {
+                if (($pendingRegistration['expires_at'] ?? 0) < time()) {
+                    clear_register_pending_data();
+                    $error = 'Verification code expired. Please register again.';
+                } else {
+                    $showVerificationModal = true;
+                    $verificationTarget = 'email';
+                    $verificationDestination = mask_register_email($pendingRegistration['email'] ?? '');
+                    $formData = array_merge($formData, [
+                        'name' => $pendingRegistration['name'] ?? '',
+                        'email' => $pendingRegistration['email'] ?? '',
+                        'username' => $pendingRegistration['username'] ?? '',
+                        'student_staff_id' => $pendingRegistration['student_staff_id'] ?? '',
+                        'department' => $pendingRegistration['department'] ?? '',
+                        'phone' => $pendingRegistration['phone'] ?? '',
+                        'role' => $pendingRegistration['role'] ?? 'student',
+                        'redirect' => $pendingRegistration['redirect'] ?? '',
+                    ]);
+
                     $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE email = ?');
                     $stmt->execute([$pendingRegistration['email']]);
                     if ($stmt->fetchColumn() > 0) {
@@ -503,100 +849,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $error = 'Username already taken. Please register again with a different username.';
                             $showVerificationModal = false;
                         } else {
-                            $newUserId = create_verified_user($db, $pendingRegistration);
-                            if ($newUserId) {
-                                send_register_success_notification($newUserId, $pendingRegistration);
-                                stage_register_success_notice($pendingRegistration);
-                                clear_register_pending_data();
-                                clear_register_email_verification_data();
-                                session_regenerate_id(true);
-                                $loginUrl = 'login.php';
-                                $redirectTarget = $pendingRegistration['redirect'] ?? $redirect;
-                                if ($redirectTarget !== '') {
-                                    $loginUrl .= '?redirect=' . urlencode($redirectTarget);
-                                }
-                                header('Location: ' . $loginUrl);
-                                exit();
-                            }
+                            $newOtp = generate_register_otp();
+                            $otpSent = send_register_otp_email($pendingRegistration['email'], $pendingRegistration['name'], $newOtp);
 
-                            $verificationError = 'Registration failed. Please try again.';
+                            if ($otpSent || !app_is_production()) {
+                                $_SESSION[REGISTER_OTP_SESSION_KEY]['otp_hash'] = hash('sha256', $newOtp);
+                                $_SESSION[REGISTER_OTP_SESSION_KEY]['expires_at'] = time() + REGISTER_OTP_EXPIRY_SECONDS;
+                                $verificationSuccess = 'A new verification code has been sent to your email.';
+                                $verificationSuccessType = 'success';
+
+                                if (!$otpSent) {
+                                    $verificationSuccess = register_development_otp_message($newOtp);
+                                    $verificationSuccessType = 'warning';
+                                    $developmentVerificationCode = $newOtp;
+                                }
+                            } else {
+                                $verificationError = 'Unable to resend the verification code right now. Please try again.';
+                            }
                         }
                     }
                 }
-            }
-        } elseif ($emailVerificationSession) {
-            if (($emailVerificationSession['expires_at'] ?? 0) < time()) {
-                clear_register_email_verification_data();
-                $error = 'Verification code expired. Please verify your email again.';
-            } else {
-                $submittedCode = trim($_POST['verification_code'] ?? '');
-                $showVerificationModal = true;
-                $verificationEmail = mask_register_email($emailVerificationSession['email'] ?? '');
-                $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
-                $formData['email'] = $emailVerificationSession['email'] ?? $formData['email'];
+            } elseif ($requestedVerificationTarget === 'phone') {
+                $phoneToVerify = normalize_register_phone((string) ($phoneVerificationSession['phone'] ?? ''));
 
-                if (!preg_match('/^\d{6}$/', $submittedCode)) {
-                    $verificationError = 'Please enter the 6-digit verification code.';
-                } elseif (!hash_equals($emailVerificationSession['otp_hash'] ?? '', hash('sha256', $submittedCode))) {
-                    $verificationError = 'Incorrect verification code. Please try again.';
+                if ($phoneToVerify === '') {
+                    clear_register_phone_verification_data();
+                    $error = 'Verification session expired. Please verify your phone number again.';
                 } else {
-                    mark_register_email_verified();
-                    $emailVerificationSession = register_email_verification_data();
-                    $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
-                    $formData['email'] = $emailVerificationSession['email'] ?? $formData['email'];
-                    $success = 'Email verified successfully. You can continue with registration.';
-                    $showVerificationModal = false;
-                    $verificationError = '';
-                    $verificationSuccess = '';
+                    $showVerificationModal = true;
+                    $verificationTarget = 'phone';
+                    $verificationDestination = mask_register_phone($phoneToVerify);
+                    $formData = merge_register_form_draft($formData, $phoneVerificationSession['draft'] ?? []);
+                    $formData['phone'] = $phoneToVerify;
+
+                    $newOtp = generate_register_otp();
+                    $smsResult = send_register_otp_sms($phoneToVerify, $formData['name'] ?: 'User', $newOtp);
+
+                    if ($smsResult['success']) {
+                        $draft = $phoneVerificationSession['draft'] ?? $formData;
+                        $draft['phone'] = $phoneToVerify;
+                        stage_register_phone_verification($phoneToVerify, $newOtp, $draft);
+                        $phoneVerificationSession = register_phone_verification_data();
+                        $verificationSuccess = 'A new verification code has been sent to your phone number.';
+                        $verificationSuccessType = 'success';
+                        $developmentVerificationCode = '';
+
+                        if (!empty($smsResult['show_preview_code'])) {
+                            $verificationSuccess = register_sms_preview_message($newOtp);
+                            $verificationSuccessType = 'warning';
+                            $developmentVerificationCode = (string) ($smsResult['temporary_code'] ?? '');
+                        }
+                    } else {
+                        $verificationError = 'Unable to resend the SMS verification code right now. Please try again.';
+                    }
                 }
-            }
-        } else {
-            $error = 'Verification session expired. Please register again.';
-        }
-    } elseif ($formAction === 'resend_otp') {
-        $pendingRegistration = register_pending_data();
-        $emailVerificationSession = register_email_verification_data();
+            } elseif ($emailVerificationSession) {
+                $emailToVerify = trim((string) ($emailVerificationSession['email'] ?? ''));
 
-        if ($pendingRegistration) {
-            if (($pendingRegistration['expires_at'] ?? 0) < time()) {
-                clear_register_pending_data();
-                $error = 'Verification code expired. Please register again.';
-            } else {
-                $showVerificationModal = true;
-                $verificationEmail = mask_register_email($pendingRegistration['email'] ?? '');
-                $formData = array_merge($formData, [
-                    'name' => $pendingRegistration['name'] ?? '',
-                    'email' => $pendingRegistration['email'] ?? '',
-                    'username' => $pendingRegistration['username'] ?? '',
-                    'student_staff_id' => $pendingRegistration['student_staff_id'] ?? '',
-                    'department' => $pendingRegistration['department'] ?? '',
-                    'phone' => $pendingRegistration['phone'] ?? '',
-                    'role' => $pendingRegistration['role'] ?? 'student',
-                    'redirect' => $pendingRegistration['redirect'] ?? '',
-                ]);
-
-                $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE email = ?');
-                $stmt->execute([$pendingRegistration['email']]);
-                if ($stmt->fetchColumn() > 0) {
-                    clear_register_pending_data();
-                    $error = 'Email already registered. Please login instead.';
-                    $showVerificationModal = false;
+                if ($emailToVerify === '') {
+                    clear_register_email_verification_data();
+                    $error = 'Verification session expired. Please verify your email again.';
                 } else {
-                    $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE username = ?');
-                    $stmt->execute([$pendingRegistration['username']]);
+                    $showVerificationModal = true;
+                    $verificationTarget = 'email';
+                    $verificationDestination = mask_register_email($emailToVerify);
+                    $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
+                    $formData['email'] = $emailToVerify;
+
+                    $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE email = ?');
+                    $stmt->execute([$emailToVerify]);
                     if ($stmt->fetchColumn() > 0) {
-                        clear_register_pending_data();
-                        $error = 'Username already taken. Please register again with a different username.';
+                        clear_register_email_verification_data();
+                        $error = 'Email already registered. Please login instead.';
                         $showVerificationModal = false;
                     } else {
                         $newOtp = generate_register_otp();
-                        $otpSent = send_register_otp_email($pendingRegistration['email'], $pendingRegistration['name'], $newOtp);
+                        $otpSent = send_register_otp_email($emailToVerify, $formData['name'] ?: 'User', $newOtp);
 
                         if ($otpSent || !app_is_production()) {
-                            $_SESSION[REGISTER_OTP_SESSION_KEY]['otp_hash'] = hash('sha256', $newOtp);
-                            $_SESSION[REGISTER_OTP_SESSION_KEY]['expires_at'] = time() + REGISTER_OTP_EXPIRY_SECONDS;
+                            stage_register_email_verification($emailToVerify, $newOtp, $emailVerificationSession['draft'] ?? $formData);
+                            $emailVerificationSession = register_email_verification_data();
                             $verificationSuccess = 'A new verification code has been sent to your email.';
                             $verificationSuccessType = 'success';
+                            $developmentVerificationCode = '';
 
                             if (!$otpSent) {
                                 $verificationSuccess = register_development_otp_message($newOtp);
@@ -608,129 +943,170 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 }
-            }
-        } elseif ($emailVerificationSession) {
-            $emailToVerify = trim((string) ($emailVerificationSession['email'] ?? ''));
-
-            if ($emailToVerify === '') {
-                clear_register_email_verification_data();
-                $error = 'Verification session expired. Please verify your email again.';
             } else {
-                $showVerificationModal = true;
-                $verificationEmail = mask_register_email($emailToVerify);
-                $formData = merge_register_form_draft($formData, $emailVerificationSession['draft'] ?? []);
-                $formData['email'] = $emailToVerify;
+                $error = 'Verification session expired. Please register again.';
+            }
+        } elseif ($formAction === 'send_email_verification_only') {
+            $input = normalize_register_input($_POST);
+            $requestedRole = $input['role'];
+            $input['role'] = in_array($requestedRole, ['student', 'staff'], true) ? $requestedRole : 'student';
+            $input['redirect'] = $redirect !== '' ? $redirect : $input['redirect'];
+            $formData = array_merge($formData, $input);
+            clear_register_pending_data();
+            $pendingRegistration = null;
 
+            $verificationEmailInput = trim((string) ($_POST['verification_email'] ?? $input['email']));
+            $response = [
+                'success' => false,
+                'message' => '',
+                'status_type' => 'success',
+                'masked_email' => $verificationEmailInput !== '' ? mask_register_email($verificationEmailInput) : '',
+                'masked_destination' => $verificationEmailInput !== '' ? mask_register_email($verificationEmailInput) : '',
+                'already_verified' => false,
+                'show_modal' => false,
+                'temporary_code' => '',
+                'verification_target' => 'email',
+            ];
+
+            if ($verificationEmailInput === '') {
+                $response['message'] = 'Please enter your email address first.';
+            } elseif (!filter_var($verificationEmailInput, FILTER_VALIDATE_EMAIL)) {
+                $response['message'] = 'Please enter a valid email address.';
+            } else {
                 $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE email = ?');
-                $stmt->execute([$emailToVerify]);
+                $stmt->execute([$verificationEmailInput]);
                 if ($stmt->fetchColumn() > 0) {
-                    clear_register_email_verification_data();
-                    $error = 'Email already registered. Please login instead.';
-                    $showVerificationModal = false;
+                    $response['message'] = 'Email already registered. Please login instead.';
+                } elseif (register_email_is_verified($verificationEmailInput)) {
+                    update_register_email_verification_draft(array_merge($input, ['email' => $verificationEmailInput]));
+                    $response['success'] = true;
+                    $response['already_verified'] = true;
+                    $response['message'] = 'This email is already verified. You can continue with registration.';
                 } else {
-                    $newOtp = generate_register_otp();
-                    $otpSent = send_register_otp_email($emailToVerify, $formData['name'] ?: 'User', $newOtp);
+                    $otpCode = generate_register_otp();
+                    $otpSent = send_register_otp_email($verificationEmailInput, $input['name'] !== '' ? $input['name'] : 'User', $otpCode);
 
                     if ($otpSent || !app_is_production()) {
-                        stage_register_email_verification($emailToVerify, $newOtp, $emailVerificationSession['draft'] ?? $formData);
+                        stage_register_email_verification($verificationEmailInput, $otpCode, $input);
                         $emailVerificationSession = register_email_verification_data();
-                        $verificationSuccess = 'A new verification code has been sent to your email.';
-                        $verificationSuccessType = 'success';
+                        $response['success'] = true;
+                        $response['show_modal'] = true;
+                        $response['message'] = 'A verification code has been sent to your email.';
 
                         if (!$otpSent) {
-                            $verificationSuccess = register_development_otp_message($newOtp);
-                            $verificationSuccessType = 'warning';
-                            $developmentVerificationCode = $newOtp;
+                            $response['message'] = register_development_otp_message($otpCode);
+                            $response['status_type'] = 'warning';
+                            $response['temporary_code'] = $otpCode;
                         }
                     } else {
-                        $verificationError = 'Unable to resend the verification code right now. Please try again.';
+                        $response['message'] = 'Unable to send verification code right now. Please try again later.';
                     }
                 }
             }
-        } else {
-            $error = 'Verification session expired. Please register again.';
-        }
-    } elseif ($formAction === 'send_email_verification_only') {
-        $input = normalize_register_input($_POST);
-        $requestedRole = $input['role'];
-        $input['role'] = in_array($requestedRole, ['student', 'staff'], true) ? $requestedRole : 'student';
-        $input['redirect'] = $redirect !== '' ? $redirect : $input['redirect'];
-        $formData = array_merge($formData, $input);
-        clear_register_pending_data();
-        $pendingRegistration = null;
 
-        $verificationEmailInput = trim((string) ($_POST['verification_email'] ?? $input['email']));
-        $response = [
-            'success' => false,
-            'message' => '',
-            'status_type' => 'success',
-            'masked_email' => $verificationEmailInput !== '' ? mask_register_email($verificationEmailInput) : '',
-            'already_verified' => false,
-            'show_modal' => false,
-            'temporary_code' => '',
-        ];
+            if ($isAjaxVerification) {
+                register_json_response($response);
+            }
 
-        if ($verificationEmailInput === '') {
-            $response['message'] = 'Please enter your email address first.';
-        } elseif (!filter_var($verificationEmailInput, FILTER_VALIDATE_EMAIL)) {
-            $response['message'] = 'Please enter a valid email address.';
-        } else {
-            $stmt = $db->prepare('SELECT COUNT(*) FROM users WHERE email = ?');
-            $stmt->execute([$verificationEmailInput]);
-            if ($stmt->fetchColumn() > 0) {
-                $response['message'] = 'Email already registered. Please login instead.';
-            } elseif (register_email_is_verified($verificationEmailInput)) {
-                update_register_email_verification_draft(array_merge($input, ['email' => $verificationEmailInput]));
+            if ($response['success']) {
+                $success = $response['message'];
+                $verificationSuccess = $response['show_modal'] ? $response['message'] : '';
+                $verificationSuccessType = $response['status_type'] ?? 'success';
+                $verificationTarget = 'email';
+                $verificationDestination = $response['masked_destination'];
+                $showVerificationModal = !empty($response['show_modal']);
+                $developmentVerificationCode = (string) ($response['temporary_code'] ?? '');
+            } else {
+                $error = $response['message'];
+            }
+        } elseif ($formAction === 'send_phone_verification_only') {
+            $input = normalize_register_input($_POST);
+            $requestedRole = $input['role'];
+            $input['role'] = in_array($requestedRole, ['student', 'staff'], true) ? $requestedRole : 'student';
+            $input['redirect'] = $redirect !== '' ? $redirect : $input['redirect'];
+            $formData = array_merge($formData, $input);
+            clear_register_pending_data();
+            $pendingRegistration = null;
+
+            $verificationPhoneInput = normalize_register_phone((string) ($_POST['verification_phone'] ?? $input['phone']));
+            if ($verificationPhoneInput !== '') {
+                $input['phone'] = $verificationPhoneInput;
+                $formData['phone'] = $verificationPhoneInput;
+            }
+
+            $response = [
+                'success' => false,
+                'message' => '',
+                'status_type' => 'success',
+                'masked_phone' => $verificationPhoneInput !== '' ? mask_register_phone($verificationPhoneInput) : '',
+                'masked_destination' => $verificationPhoneInput !== '' ? mask_register_phone($verificationPhoneInput) : '',
+                'normalized_phone' => $verificationPhoneInput,
+                'already_verified' => false,
+                'show_modal' => false,
+                'temporary_code' => '',
+                'verification_target' => 'phone',
+            ];
+
+            if (trim((string) ($_POST['verification_phone'] ?? $input['phone'])) === '') {
+                $response['message'] = 'Please enter your phone number first.';
+            } elseif ($verificationPhoneInput === '') {
+                $response['message'] = 'Please enter a valid Malaysian or international mobile number.';
+            } elseif (register_phone_is_verified($verificationPhoneInput)) {
+                update_register_phone_verification_draft(array_merge($input, ['phone' => $verificationPhoneInput]));
                 $response['success'] = true;
                 $response['already_verified'] = true;
-                $response['message'] = 'This email is already verified. You can continue with registration.';
+                $response['message'] = 'This phone number is already verified. You can continue with registration.';
             } else {
                 $otpCode = generate_register_otp();
-                $otpSent = send_register_otp_email($verificationEmailInput, $input['name'] !== '' ? $input['name'] : 'User', $otpCode);
+                $smsResult = send_register_otp_sms($verificationPhoneInput, $input['name'] !== '' ? $input['name'] : 'User', $otpCode);
 
-                if ($otpSent || !app_is_production()) {
-                    stage_register_email_verification($verificationEmailInput, $otpCode, $input);
-                    $emailVerificationSession = register_email_verification_data();
+                if ($smsResult['success']) {
+                    stage_register_phone_verification($verificationPhoneInput, $otpCode, $input);
+                    $phoneVerificationSession = register_phone_verification_data();
                     $response['success'] = true;
                     $response['show_modal'] = true;
-                    $response['message'] = 'A verification code has been sent to your email.';
+                    $response['message'] = 'A verification code has been sent to your phone number.';
 
-                    if (!$otpSent) {
-                        $response['message'] = register_development_otp_message($otpCode);
+                    if (!empty($smsResult['show_preview_code'])) {
+                        $response['message'] = register_sms_preview_message($otpCode);
                         $response['status_type'] = 'warning';
-                        $response['temporary_code'] = $otpCode;
+                        $response['temporary_code'] = (string) ($smsResult['temporary_code'] ?? $otpCode);
                     }
                 } else {
-                    $response['message'] = 'Unable to send verification code right now. Please try again later.';
+                    $response['message'] = 'Unable to send the SMS verification code right now. Please try again later.';
                 }
             }
-        }
 
-        if ($isAjaxEmailVerification) {
-            header('Content-Type: application/json');
-            echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            exit();
-        }
+            if ($isAjaxVerification) {
+                register_json_response($response);
+            }
 
-        if ($response['success']) {
-            $success = $response['message'];
-            $verificationSuccess = $response['show_modal'] ? $response['message'] : '';
-            $verificationSuccessType = $response['status_type'] ?? 'success';
-            $verificationEmail = $response['masked_email'];
-            $showVerificationModal = !empty($response['show_modal']);
-            $developmentVerificationCode = (string) ($response['temporary_code'] ?? '');
+            if ($response['success']) {
+                $success = $response['message'];
+                $verificationSuccess = $response['show_modal'] ? $response['message'] : '';
+                $verificationSuccessType = $response['status_type'] ?? 'success';
+                $verificationTarget = 'phone';
+                $verificationDestination = $response['masked_destination'];
+                $showVerificationModal = !empty($response['show_modal']);
+                $developmentVerificationCode = (string) ($response['temporary_code'] ?? '');
+            } else {
+                $error = $response['message'];
+            }
         } else {
-            $error = $response['message'];
-        }
-    } else {
         $input = normalize_register_input($_POST);
         $requested_role = $input['role'];
         $role = in_array($requested_role, ['student', 'staff'], true) ? $requested_role : 'student';
         $input['role'] = $role;
         $input['redirect'] = $redirect !== '' ? $redirect : $input['redirect'];
         $formData = array_merge($formData, $input);
+        $normalizedPhone = normalize_register_phone($input['phone']);
 
-        if (empty($input['name']) || empty($input['email']) || empty($input['username']) || empty($input['password'])) {
+        if ($normalizedPhone !== '') {
+            $input['phone'] = $normalizedPhone;
+            $formData['phone'] = $normalizedPhone;
+        }
+
+        if (empty($input['name']) || empty($input['email']) || empty($input['username']) || empty($input['password']) || empty($input['phone'])) {
             $error = 'Please fill in all required fields';
         } elseif ($input['password'] !== $input['confirm_password']) {
             $error = 'Passwords do not match';
@@ -738,6 +1114,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = $passwordError;
         } elseif (!filter_var($input['email'], FILTER_VALIDATE_EMAIL)) {
             $error = 'Invalid email format';
+        } elseif ($normalizedPhone === '') {
+            $error = 'Please enter a valid Malaysian or international mobile number.';
         } elseif (empty($input['student_staff_id'])) {
             $error = $role === 'student' ? 'Please enter your Student ID' : 'Please enter your Staff ID';
         } elseif (empty($input['department'])) {
@@ -757,7 +1135,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if ($passwordHash === false) {
                         $error = 'Unable to secure your password right now. Please try again.';
-                    } elseif (register_email_is_verified($input['email'])) {
+                    } elseif (!register_email_is_verified($input['email'])) {
+                        clear_register_pending_data();
+                        $pendingRegistration = null;
+                        $error = 'Please verify your email first using the Verify Email button.';
+                    } elseif (!register_phone_is_verified($input['phone'])) {
+                        clear_register_pending_data();
+                        $pendingRegistration = null;
+                        $error = 'Please verify your phone number first using the Verify Phone button.';
+                    } else {
                         $registrationData = $input;
                         $registrationData['password_hash'] = $passwordHash;
 
@@ -767,6 +1153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             stage_register_success_notice($registrationData);
                             clear_register_pending_data();
                             clear_register_email_verification_data();
+                            clear_register_phone_verification_data();
                             session_regenerate_id(true);
                             $loginUrl = 'login.php';
                             $redirectTarget = $input['redirect'] ?? $redirect;
@@ -778,10 +1165,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         $error = 'Registration failed. Please try again.';
-                    } else {
-                        clear_register_pending_data();
-                        $pendingRegistration = null;
-                        $error = 'Please verify your email first using the Verify Email button.';
                     }
                 }
             }
@@ -790,17 +1173,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pendingRegistration = register_pending_data();
         $emailVerificationSession = register_email_verification_data();
+        $phoneVerificationSession = register_phone_verification_data();
         $emailIsVerified = register_email_is_verified($formData['email']);
+        $phoneIsVerified = register_phone_is_verified($formData['phone']);
         $verificationModalIsRegistrationFlow = $pendingRegistration !== null;
     } catch (Throwable $exception) {
         register_log_issue(
             'Registration request failed'
-            . ($isAjaxEmailVerificationRequest ? ' during AJAX email verification' : '')
+            . ($isAjaxVerificationRequest ? ' during AJAX verification' : '')
             . ': ' . $exception->getMessage()
             . ' in ' . $exception->getFile() . ':' . $exception->getLine()
         );
 
-        if ($isAjaxEmailVerificationRequest) {
+        if ($isAjaxVerificationRequest) {
             register_json_response([
                 'success' => false,
                 'message' => 'Unable to process the verification request right now. Please try again later.',
@@ -933,6 +1318,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
                         <?php endif; ?>
                         <div id="emailVerificationFeedback" class="d-none"></div>
+                        <div id="phoneVerificationFeedback" class="d-none"></div>
                         
                         <form method="POST" action="" id="registerForm">
                             <?= csrf_field() ?>
@@ -989,8 +1375,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     </small>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label for="phone" class="form-label">Phone Number</label>
-                                    <input type="tel" class="form-control" id="phone" name="phone" value="<?= htmlspecialchars($formData['phone']) ?>">
+                                    <label for="phone" class="form-label required-field">Phone Number</label>
+                                    <div class="input-group email-verify-group">
+                                        <input
+                                            type="tel"
+                                            class="form-control"
+                                            id="phone"
+                                            name="phone"
+                                            value="<?= htmlspecialchars($formData['phone']) ?>"
+                                            placeholder="e.g., 0123456789 or +60123456789"
+                                            required
+                                        >
+                                        <button type="button" class="btn <?= $phoneIsVerified ? 'btn-success' : 'btn-outline-warning' ?>" id="verifyPhoneBtn">
+                                            <i class="fas fa-sms me-1"></i> Verify Phone
+                                        </button>
+                                    </div>
+                                    <small
+                                        class="email-verification-hint <?= $phoneIsVerified ? 'text-success' : 'text-muted' ?>"
+                                        id="phoneVerificationHint"
+                                    >
+                                        <?= $phoneIsVerified
+                                            ? 'This phone number is verified for this registration session.'
+                                            : 'Enter your phone number first, then click Verify Phone.' ?>
+                                    </small>
                                 </div>
                             </div>
                             
@@ -998,31 +1405,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <div class="col-md-6 mb-3">
                                     <label for="password" class="form-label required-field">Password</label>
                                     <div class="input-group password-field-group">
-                                        <input type="password" class="form-control" id="password" name="password" minlength="8" pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}" title="Password must be at least 8 characters and include uppercase, lowercase, number, and special character." required<?= $emailIsVerified ? '' : ' disabled' ?>>
+                                        <input type="password" class="form-control" id="password" name="password" minlength="8" pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}" title="Password must be at least 8 characters and include uppercase, lowercase, number, and special character." required<?= ($emailIsVerified && $phoneIsVerified) ? '' : ' disabled' ?>>
                                         <button
                                             type="button"
                                             class="btn btn-outline-secondary password-toggle"
                                             data-target="password"
                                             aria-label="Show password"
                                             title="Show password"
-                                            <?= $emailIsVerified ? '' : 'disabled' ?>
+                                            <?= ($emailIsVerified && $phoneIsVerified) ? '' : 'disabled' ?>
                                         >
                                             <i class="fas fa-eye"></i>
                                         </button>
                                     </div>
-                                    <small class="text-muted" id="passwordHelpText"><?= $emailIsVerified ? 'Minimum 8 characters with uppercase, lowercase, number, and special character' : 'Verify your email first, then create your password.' ?></small>
+                                    <small class="text-muted" id="passwordHelpText"><?= ($emailIsVerified && $phoneIsVerified) ? 'Minimum 8 characters with uppercase, lowercase, number, and special character' : 'Verify your email and phone first, then create your password.' ?></small>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="confirm_password" class="form-label required-field">Confirm Password</label>
                                     <div class="input-group password-field-group">
-                                        <input type="password" class="form-control" id="confirm_password" name="confirm_password" required<?= $emailIsVerified ? '' : ' disabled' ?>>
+                                        <input type="password" class="form-control" id="confirm_password" name="confirm_password" required<?= ($emailIsVerified && $phoneIsVerified) ? '' : ' disabled' ?>>
                                         <button
                                             type="button"
                                             class="btn btn-outline-secondary password-toggle"
                                             data-target="confirm_password"
                                             aria-label="Show password"
                                             title="Show password"
-                                            <?= $emailIsVerified ? '' : 'disabled' ?>
+                                            <?= ($emailIsVerified && $phoneIsVerified) ? '' : 'disabled' ?>
                                         >
                                             <i class="fas fa-eye"></i>
                                         </button>
@@ -1052,7 +1459,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                             
                             <div class="d-grid">
-                                <button type="submit" class="btn btn-primary" id="registerSubmitBtn"<?= $emailIsVerified ? '' : ' disabled' ?>>
+                                <button type="submit" class="btn btn-primary" id="registerSubmitBtn"<?= ($emailIsVerified && $phoneIsVerified) ? '' : ' disabled' ?>>
                                     <i class="fas fa-user-plus"></i> Register
                                 </button>
                             </div>
@@ -1072,13 +1479,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="emailVerificationModalLabel"><i class="fas fa-envelope-open-text"></i> Verify Your Email</h5>
+                    <h5 class="modal-title" id="emailVerificationModalLabel"><i class="fas fa-shield-alt"></i> Verify Your Contact</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-3" id="verificationModalDescription">
                         Enter the 6-digit verification code sent to
-                        <strong id="verificationEmailText"><?= htmlspecialchars($verificationEmail) ?></strong><span id="verificationModalSuffix">.</span>
+                        <strong id="verificationEmailText"><?= htmlspecialchars($verificationDestination) ?></strong><span id="verificationModalSuffix">.</span>
                     </p>
                     <p class="text-muted small mb-3">The code expires in 5 minutes.</p>
 
@@ -1101,6 +1508,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <form method="POST" action="" id="verificationForm">
                         <?= csrf_field() ?>
                         <input type="hidden" name="form_action" value="verify_otp">
+                        <input type="hidden" name="verification_target" id="verificationTargetInput" value="<?= htmlspecialchars($verificationTarget) ?>">
                         <div class="mb-3">
                             <label for="verification_code" class="form-label required-field">Verification Code</label>
                             <input
@@ -1126,6 +1534,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <form method="POST" action="" class="mt-3 text-center">
                         <?= csrf_field() ?>
                         <input type="hidden" name="form_action" value="resend_otp">
+                        <input type="hidden" name="verification_target" id="resendVerificationTargetInput" value="<?= htmlspecialchars($verificationTarget) ?>">
                         <button type="submit" class="btn btn-link text-decoration-none">Resend Code</button>
                     </form>
                 </div>
@@ -1135,22 +1544,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Role selection function
         function selectRole(role) {
-            // Update hidden input
             document.getElementById('roleInput').value = role;
-            
-            // Update UI for role cards
+
             document.querySelectorAll('.role-card').forEach(card => {
                 card.classList.remove('selected');
             });
             document.querySelector(`.role-card[data-role="${role}"]`).classList.add('selected');
-            
-            // Update labels based on role
+
             const idLabel = document.getElementById('idLabel');
             const idHelpText = document.getElementById('idHelpText');
             const studentStaffId = document.getElementById('student_staff_id');
-            
+
             if (role === 'student') {
                 idLabel.innerHTML = 'Student ID';
                 idHelpText.innerHTML = 'Enter your matriculation/student ID number';
@@ -1161,17 +1566,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 studentStaffId.placeholder = 'e.g., STF001 or EMP12345';
             }
         }
-        
-        // Set initial selected role based on POST data or default
+
         const initialRole = '<?= htmlspecialchars($formData['role'], ENT_QUOTES, 'UTF-8') ?>';
         selectRole(initialRole);
-        
-        // Password confirmation validation
+
         const password = document.getElementById('password');
         const confirmPassword = document.getElementById('confirm_password');
         const passwordHelpText = document.getElementById('passwordHelpText');
         const registerSubmitBtn = document.getElementById('registerSubmitBtn');
         const passwordToggleButtons = document.querySelectorAll('.password-toggle');
+        const registerForm = document.getElementById('registerForm');
+        const verifyEmailBtn = document.getElementById('verifyEmailBtn');
+        const verifyPhoneBtn = document.getElementById('verifyPhoneBtn');
+        const emailInput = document.getElementById('email');
+        const phoneInput = document.getElementById('phone');
+        const emailVerificationModal = document.getElementById('emailVerificationModal');
+        const emailVerificationModalLabel = document.getElementById('emailVerificationModalLabel');
+        const verificationEmailText = document.getElementById('verificationEmailText');
+        const verificationModalDescription = document.getElementById('verificationModalDescription');
+        const verificationModalSuffix = document.getElementById('verificationModalSuffix');
+        const verificationSubmitBtn = document.getElementById('verificationSubmitBtn');
+        const verificationStatusFeedback = document.getElementById('verificationStatusFeedback');
+        const developmentOtpPreview = document.getElementById('developmentOtpPreview');
+        const developmentOtpCode = document.getElementById('developmentOtpCode');
+        const emailVerificationFeedback = document.getElementById('emailVerificationFeedback');
+        const phoneVerificationFeedback = document.getElementById('phoneVerificationFeedback');
+        const emailVerificationHint = document.getElementById('emailVerificationHint');
+        const phoneVerificationHint = document.getElementById('phoneVerificationHint');
+        const csrfTokenInput = registerForm.querySelector('input[name="csrf_token"]');
+        const verificationTargetInput = document.getElementById('verificationTargetInput');
+        const resendVerificationTargetInput = document.getElementById('resendVerificationTargetInput');
+        const hasPendingRegistration = <?= $pendingRegistration ? 'true' : 'false' ?>;
+        let hasPendingEmailVerification = <?= ($emailVerificationSession && empty($emailVerificationSession['verified_at'])) ? 'true' : 'false' ?>;
+        let hasPendingPhoneVerification = <?= ($phoneVerificationSession && empty($phoneVerificationSession['verified_at'])) ? 'true' : 'false' ?>;
+        let pendingVerificationEmail = <?= json_encode((string) ($emailVerificationSession['email'] ?? '')) ?>;
+        let pendingVerificationPhone = <?= json_encode((string) ($phoneVerificationSession['phone'] ?? '')) ?>;
+        let verifiedEmail = <?= json_encode((string) ($emailIsVerified ? $formData['email'] : '')) ?>;
+        let verifiedPhone = <?= json_encode((string) ($phoneIsVerified ? $formData['phone'] : '')) ?>;
+        const initialModalTarget = <?= json_encode((string) $verificationTarget) ?>;
+        const initialModalDestination = <?= json_encode((string) $verificationDestination) ?>;
+        const initialDevelopmentCode = <?= json_encode((string) $developmentVerificationCode) ?>;
+        const redirectTarget = <?= json_encode($redirect) ?>;
+        const modalInstance = emailVerificationModal ? bootstrap.Modal.getOrCreateInstance(emailVerificationModal) : null;
 
         function syncPasswordToggle(button, input) {
             const icon = button ? button.querySelector('i') : null;
@@ -1202,6 +1638,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 syncPasswordToggle(button, input);
             });
         });
+
+        function normalizeEmailValue(value) {
+            return String(value || '').trim().toLowerCase();
+        }
+
+        function normalizePhoneValue(value) {
+            let phone = String(value || '').trim();
+            if (phone === '') {
+                return '';
+            }
+
+            phone = phone.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+
+            if (phone.startsWith('00')) {
+                phone = `+${phone.slice(2)}`;
+            }
+
+            if (phone.startsWith('+')) {
+                const digits = phone.slice(1).replace(/\D+/g, '');
+                if (digits.length < 8 || digits.length > 15) {
+                    return '';
+                }
+
+                return `+${digits}`;
+            }
+
+            let digits = phone.replace(/\D+/g, '');
+            if (digits === '') {
+                return '';
+            }
+
+            if (digits.startsWith('60')) {
+                digits = digits;
+            } else if (digits.startsWith('0')) {
+                digits = `60${digits.slice(1)}`;
+            } else if (/^1\d{8,9}$/.test(digits)) {
+                digits = `60${digits}`;
+            }
+
+            if (digits.length < 8 || digits.length > 15) {
+                return '';
+            }
+
+            return `+${digits}`;
+        }
+
+        function showFeedback(element, type, message) {
+            if (!element) {
+                return;
+            }
+
+            const normalizedMessage = String(message || '').trim();
+            if (normalizedMessage === '') {
+                element.className = 'd-none';
+                element.textContent = '';
+                return;
+            }
+
+            element.className = `alert alert-${type}`;
+            element.textContent = normalizedMessage;
+        }
+
+        function showEmailVerificationFeedback(type, message) {
+            showFeedback(emailVerificationFeedback, type, message);
+        }
+
+        function showPhoneVerificationFeedback(type, message) {
+            showFeedback(phoneVerificationFeedback, type, message);
+        }
+
+        function isEmailVerifiedForCurrentInput() {
+            const currentEmail = normalizeEmailValue(emailInput ? emailInput.value : '');
+            const verifiedEmailNormalized = normalizeEmailValue(verifiedEmail);
+            return currentEmail !== '' && verifiedEmailNormalized !== '' && currentEmail === verifiedEmailNormalized;
+        }
+
+        function isPhoneVerifiedForCurrentInput() {
+            const currentPhone = normalizePhoneValue(phoneInput ? phoneInput.value : '');
+            const verifiedPhoneNormalized = normalizePhoneValue(verifiedPhone);
+            return currentPhone !== '' && verifiedPhoneNormalized !== '' && currentPhone === verifiedPhoneNormalized;
+        }
 
         function validatePasswordStrength() {
             const value = password.value;
@@ -1235,67 +1752,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         password.addEventListener('input', validatePassword);
         password.addEventListener('change', validatePassword);
         confirmPassword.addEventListener('keyup', validatePassword);
-        
-        // Form validation before submit
-        const registerForm = document.getElementById('registerForm');
-        registerForm.addEventListener('submit', function(e) {
-            const role = document.getElementById('roleInput').value;
-            const studentStaffId = document.getElementById('student_staff_id').value;
-            const currentEmail = normalizeEmailValue(emailInput.value);
-            const verifiedEmailNormalized = normalizeEmailValue(verifiedEmail);
-
-            if (currentEmail === '' || verifiedEmailNormalized === '' || currentEmail !== verifiedEmailNormalized) {
-                e.preventDefault();
-                showEmailVerificationFeedback('warning', 'Please verify your email first using the Verify Email button.');
-                emailInput.focus();
-                return false;
-            }
-
-            validatePassword();
-            
-            if (!studentStaffId.trim()) {
-                e.preventDefault();
-                alert(role === 'student' ? 'Please enter your Student ID' : 'Please enter your Staff ID');
-                return false;
-            }
-        });
-
-        const verifyEmailBtn = document.getElementById('verifyEmailBtn');
-        const emailInput = document.getElementById('email');
-        const emailVerificationModal = document.getElementById('emailVerificationModal');
-        const verificationEmailText = document.getElementById('verificationEmailText');
-        const verificationModalSuffix = document.getElementById('verificationModalSuffix');
-        const verificationSubmitBtn = document.getElementById('verificationSubmitBtn');
-        const verificationStatusFeedback = document.getElementById('verificationStatusFeedback');
-        const developmentOtpPreview = document.getElementById('developmentOtpPreview');
-        const developmentOtpCode = document.getElementById('developmentOtpCode');
-        const emailVerificationFeedback = document.getElementById('emailVerificationFeedback');
-        const emailVerificationHint = document.getElementById('emailVerificationHint');
-        const csrfTokenInput = registerForm.querySelector('input[name="csrf_token"]');
-        const hasPendingRegistration = <?= $pendingRegistration ? 'true' : 'false' ?>;
-        let hasPendingVerification = <?= ($pendingRegistration || ($emailVerificationSession && empty($emailVerificationSession['verified_at']))) ? 'true' : 'false' ?>;
-        let pendingVerificationEmail = <?= json_encode((string) ($pendingRegistration['email'] ?? ($emailVerificationSession['email'] ?? ''))) ?>;
-        let verifiedEmail = <?= json_encode((string) (($emailIsVerified ? $formData['email'] : ''))) ?>;
-
-        function normalizeEmailValue(value) {
-            return String(value || '').trim().toLowerCase();
-        }
-
-        function showEmailVerificationFeedback(type, message) {
-            if (!emailVerificationFeedback) {
-                return;
-            }
-
-            const normalizedMessage = String(message || '').trim();
-            if (normalizedMessage === '') {
-                emailVerificationFeedback.className = 'd-none';
-                emailVerificationFeedback.textContent = '';
-                return;
-            }
-
-            emailVerificationFeedback.className = `alert alert-${type}`;
-            emailVerificationFeedback.textContent = normalizedMessage;
-        }
 
         function setVerificationStatus(type, message) {
             if (!verificationStatusFeedback) {
@@ -1364,20 +1820,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (passwordHelpText) {
                 passwordHelpText.textContent = locked
-                    ? 'Verify your email first, then create your password.'
+                    ? 'Verify your email and phone first, then create your password.'
                     : 'Minimum 8 characters with uppercase, lowercase, number, and special character';
             }
         }
 
-        function setVerificationModalMode(isRegistrationFlow) {
+        function syncRegistrationAccess() {
+            setPasswordFieldsLocked(!(isEmailVerifiedForCurrentInput() && isPhoneVerifiedForCurrentInput()));
+        }
+
+        function setVerificationModalMode(target, isRegistrationFlow, maskedDestination) {
+            const normalizedTarget = target === 'phone' ? 'phone' : 'email';
+            const destinationLabel = normalizedTarget === 'phone' ? 'phone number' : 'email address';
+            const destinationIcon = normalizedTarget === 'phone' ? 'mobile-alt' : 'envelope-open-text';
+
+            if (emailVerificationModalLabel) {
+                emailVerificationModalLabel.innerHTML = `<i class="fas fa-${destinationIcon}"></i> Verify Your ${normalizedTarget === 'phone' ? 'Phone' : 'Email'}`;
+            }
+
+            if (verificationEmailText) {
+                verificationEmailText.textContent = maskedDestination || '';
+            }
+
             if (verificationModalSuffix) {
-                verificationModalSuffix.textContent = isRegistrationFlow ? '.' : ' to verify this email address.';
+                verificationModalSuffix.textContent = isRegistrationFlow ? '.' : ` to verify this ${destinationLabel}.`;
             }
 
             if (verificationSubmitBtn) {
-                verificationSubmitBtn.innerHTML = isRegistrationFlow
-                    ? '<i class="fas fa-check-circle"></i> Verify & Complete Registration'
-                    : '<i class="fas fa-check-circle"></i> Verify Email';
+                if (isRegistrationFlow) {
+                    verificationSubmitBtn.innerHTML = '<i class="fas fa-check-circle"></i> Verify & Complete Registration';
+                } else {
+                    verificationSubmitBtn.innerHTML = normalizedTarget === 'phone'
+                        ? '<i class="fas fa-check-circle"></i> Verify Phone'
+                        : '<i class="fas fa-check-circle"></i> Verify Email';
+                }
+            }
+
+            if (verificationTargetInput) {
+                verificationTargetInput.value = normalizedTarget;
+            }
+
+            if (resendVerificationTargetInput) {
+                resendVerificationTargetInput.value = normalizedTarget;
             }
         }
 
@@ -1390,7 +1874,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const verifiedEmailNormalized = normalizeEmailValue(verifiedEmail);
             const pendingEmailNormalized = normalizeEmailValue(pendingVerificationEmail);
             const isVerifiedForCurrentEmail = currentEmail !== '' && verifiedEmailNormalized !== '' && currentEmail === verifiedEmailNormalized;
-            const hasPendingOtpForCurrentEmail = currentEmail !== '' && hasPendingVerification && pendingEmailNormalized !== '' && currentEmail === pendingEmailNormalized;
+            const hasPendingOtpForCurrentEmail = currentEmail !== '' && hasPendingEmailVerification && pendingEmailNormalized !== '' && currentEmail === pendingEmailNormalized;
             const canRequestVerification = currentEmail !== '' && emailInput.checkValidity();
 
             verifyEmailBtn.classList.remove('btn-outline-warning', 'btn-outline-secondary', 'btn-success');
@@ -1400,36 +1884,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 verifyEmailBtn.classList.add('btn-success');
                 emailVerificationHint.className = 'email-verification-hint text-success';
                 emailVerificationHint.textContent = 'This email is verified for this registration session.';
-                setPasswordFieldsLocked(false);
-                return;
-            }
-
-            setPasswordFieldsLocked(true);
-
-            if (currentEmail === '') {
+            } else if (currentEmail === '') {
                 verifyEmailBtn.classList.add('btn-outline-secondary');
                 emailVerificationHint.className = 'email-verification-hint text-muted';
                 emailVerificationHint.textContent = 'Enter your email first, then click Verify Email.';
-                return;
-            }
-
-            if (!emailInput.checkValidity()) {
+            } else if (!emailInput.checkValidity()) {
                 verifyEmailBtn.classList.add('btn-outline-secondary');
                 emailVerificationHint.className = 'email-verification-hint text-muted';
                 emailVerificationHint.textContent = 'Enter a valid email address before verifying.';
-                return;
-            }
-
-            if (hasPendingOtpForCurrentEmail) {
+            } else if (hasPendingOtpForCurrentEmail) {
                 verifyEmailBtn.classList.add('btn-outline-secondary');
                 emailVerificationHint.className = 'email-verification-hint text-warning';
                 emailVerificationHint.textContent = 'A verification code is already waiting for this email. Click Verify Email to continue.';
+            } else {
+                verifyEmailBtn.classList.add('btn-outline-warning');
+                emailVerificationHint.className = 'email-verification-hint text-muted';
+                emailVerificationHint.textContent = 'Use Verify Email to confirm this address before registering.';
+            }
+
+            syncRegistrationAccess();
+        }
+
+        function syncVerifyPhoneUi() {
+            if (!verifyPhoneBtn || !phoneInput || !phoneVerificationHint) {
                 return;
             }
 
-            verifyEmailBtn.classList.add('btn-outline-warning');
-            emailVerificationHint.className = 'email-verification-hint text-muted';
-            emailVerificationHint.textContent = 'Use Verify Email to confirm this address before registering.';
+            const currentPhone = normalizePhoneValue(phoneInput.value);
+            const verifiedPhoneNormalized = normalizePhoneValue(verifiedPhone);
+            const pendingPhoneNormalized = normalizePhoneValue(pendingVerificationPhone);
+            const isVerifiedForCurrentPhone = currentPhone !== '' && verifiedPhoneNormalized !== '' && currentPhone === verifiedPhoneNormalized;
+            const hasPendingOtpForCurrentPhone = currentPhone !== '' && hasPendingPhoneVerification && pendingPhoneNormalized !== '' && currentPhone === pendingPhoneNormalized;
+            const canRequestVerification = currentPhone !== '' && normalizePhoneValue(phoneInput.value) !== '';
+
+            verifyPhoneBtn.classList.remove('btn-outline-warning', 'btn-outline-secondary', 'btn-success');
+            verifyPhoneBtn.disabled = !canRequestVerification;
+
+            if (isVerifiedForCurrentPhone) {
+                verifyPhoneBtn.classList.add('btn-success');
+                phoneVerificationHint.className = 'email-verification-hint text-success';
+                phoneVerificationHint.textContent = 'This phone number is verified for this registration session.';
+            } else if (phoneInput.value.trim() === '') {
+                verifyPhoneBtn.classList.add('btn-outline-secondary');
+                phoneVerificationHint.className = 'email-verification-hint text-muted';
+                phoneVerificationHint.textContent = 'Enter your phone number first, then click Verify Phone.';
+            } else if (!canRequestVerification) {
+                verifyPhoneBtn.classList.add('btn-outline-secondary');
+                phoneVerificationHint.className = 'email-verification-hint text-muted';
+                phoneVerificationHint.textContent = 'Enter a valid Malaysian or international mobile number before verifying.';
+            } else if (hasPendingOtpForCurrentPhone) {
+                verifyPhoneBtn.classList.add('btn-outline-secondary');
+                phoneVerificationHint.className = 'email-verification-hint text-warning';
+                phoneVerificationHint.textContent = 'A verification code is already waiting for this phone number. Click Verify Phone to continue.';
+            } else {
+                verifyPhoneBtn.classList.add('btn-outline-warning');
+                phoneVerificationHint.className = 'email-verification-hint text-muted';
+                phoneVerificationHint.textContent = 'Use Verify Phone to confirm this number before registering.';
+            }
+
+            syncRegistrationAccess();
+        }
+
+        function openVerificationModal(target, maskedDestination, isRegistrationFlow) {
+            if (!modalInstance) {
+                return;
+            }
+
+            const verificationCodeInput = document.getElementById('verification_code');
+            if (verificationCodeInput) {
+                verificationCodeInput.value = '';
+            }
+
+            setVerificationModalMode(target, isRegistrationFlow, maskedDestination);
+            modalInstance.show();
         }
 
         if (verifyEmailBtn && registerForm && emailInput) {
@@ -1459,13 +1986,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     return;
                 }
 
-                if (hasPendingVerification && pendingEmail !== '' && normalizedCurrentEmail === pendingEmail) {
-                    if (emailVerificationModal) {
-                        setVerificationModalMode(hasPendingRegistration);
-                        bootstrap.Modal.getOrCreateInstance(emailVerificationModal).show();
-                        showEmailVerificationFeedback('info', 'Continue by entering the verification code for this email.');
-                        return;
-                    }
+                if (hasPendingEmailVerification && pendingEmail !== '' && normalizedCurrentEmail === pendingEmail) {
+                    openVerificationModal('email', currentEmail, hasPendingRegistration);
+                    showEmailVerificationFeedback('info', 'Continue by entering the verification code for this email.');
+                    return;
                 }
 
                 const originalButtonHtml = verifyEmailBtn.innerHTML;
@@ -1518,23 +2042,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if (result.already_verified) {
                         verifiedEmail = currentEmail;
-                        hasPendingVerification = false;
+                        hasPendingEmailVerification = false;
                         pendingVerificationEmail = '';
                         syncVerifyEmailUi();
                         return;
                     }
 
-                    hasPendingVerification = !!result.show_modal;
+                    hasPendingEmailVerification = !!result.show_modal;
                     pendingVerificationEmail = currentEmail;
                     syncVerifyEmailUi();
 
-                    if (result.show_modal && emailVerificationModal) {
-                        const verificationCodeInput = document.getElementById('verification_code');
-                        if (verificationCodeInput) {
-                            verificationCodeInput.value = '';
-                        }
-                        setVerificationModalMode(false);
-                        bootstrap.Modal.getOrCreateInstance(emailVerificationModal).show();
+                    if (result.show_modal) {
+                        openVerificationModal('email', result.masked_destination || result.masked_email || currentEmail, false);
                     }
                 } catch (error) {
                     showEmailVerificationFeedback('danger', error.message || 'Unable to send verification code right now. Please try again later.');
@@ -1550,17 +2069,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 const pendingEmail = normalizeEmailValue(pendingVerificationEmail);
 
                 if (currentEmail === '' || (pendingEmail !== '' && currentEmail !== pendingEmail)) {
-                    hasPendingVerification = false;
+                    hasPendingEmailVerification = false;
                     pendingVerificationEmail = '';
                     showEmailVerificationFeedback('secondary', '');
                     setVerificationStatus('success', '');
                     setDevelopmentOtpPreview('');
 
-                    if (!hasPendingRegistration && emailVerificationModal) {
-                        const existingModal = bootstrap.Modal.getInstance(emailVerificationModal);
-                        if (existingModal) {
-                            existingModal.hide();
-                        }
+                    if (!hasPendingRegistration && modalInstance) {
+                        modalInstance.hide();
                     }
                 }
 
@@ -1571,22 +2087,187 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 syncVerifyEmailUi();
             });
-            syncVerifyEmailUi();
-            setDevelopmentOtpPreview(<?= json_encode((string) $developmentVerificationCode) ?>);
         }
 
-        <?php if ($showVerificationModal): ?>
-        if (emailVerificationModal) {
-            setVerificationModalMode(<?= $verificationModalIsRegistrationFlow ? 'true' : 'false' ?>);
-            const verificationModal = new bootstrap.Modal(emailVerificationModal);
-            verificationModal.show();
+        if (verifyPhoneBtn && registerForm && phoneInput) {
+            verifyPhoneBtn.addEventListener('click', async function() {
+                const currentPhoneRaw = phoneInput.value.trim();
+                const currentPhone = normalizePhoneValue(currentPhoneRaw);
+                const pendingPhone = normalizePhoneValue(pendingVerificationPhone);
+                const normalizedVerifiedPhone = normalizePhoneValue(verifiedPhone);
 
+                if (currentPhoneRaw === '') {
+                    phoneInput.reportValidity();
+                    phoneInput.focus();
+                    return;
+                }
+
+                if (currentPhone === '') {
+                    showPhoneVerificationFeedback('warning', 'Enter a valid Malaysian or international mobile number before verifying.');
+                    phoneInput.focus();
+                    return;
+                }
+
+                if (normalizedVerifiedPhone !== '' && currentPhone === normalizedVerifiedPhone) {
+                    showPhoneVerificationFeedback('success', 'This phone number is already verified. You can continue with registration.');
+                    setVerificationStatus('success', '');
+                    setDevelopmentOtpPreview('');
+                    syncVerifyPhoneUi();
+                    return;
+                }
+
+                if (hasPendingPhoneVerification && pendingPhone !== '' && currentPhone === pendingPhone) {
+                    openVerificationModal('phone', currentPhone, false);
+                    showPhoneVerificationFeedback('info', 'Continue by entering the verification code for this phone number.');
+                    return;
+                }
+
+                const originalButtonHtml = verifyPhoneBtn.innerHTML;
+                verifyPhoneBtn.disabled = true;
+                verifyPhoneBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Sending...';
+
+                try {
+                    const payload = new URLSearchParams();
+                    payload.set('csrf_token', csrfTokenInput ? csrfTokenInput.value : '');
+                    payload.set('form_action', 'send_phone_verification_only');
+                    payload.set('verification_phone', currentPhoneRaw);
+                    payload.set('email', emailInput ? emailInput.value.trim() : '');
+                    payload.set('name', document.getElementById('name')?.value.trim() || '');
+                    payload.set('username', document.getElementById('username')?.value.trim() || '');
+                    payload.set('student_staff_id', document.getElementById('student_staff_id')?.value.trim() || '');
+                    payload.set('department', document.getElementById('department')?.value || '');
+                    payload.set('phone', currentPhoneRaw);
+                    payload.set('role', document.getElementById('roleInput')?.value || 'student');
+                    payload.set('redirect', redirectTarget);
+
+                    const response = await fetch(registerForm.getAttribute('action') || window.location.href, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: payload.toString()
+                    });
+
+                    const responseText = await response.text();
+                    let result;
+
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (error) {
+                        throw new Error(responseText || 'Unexpected server response.');
+                    }
+
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.message || 'Unable to send the SMS verification code right now. Please try again later.');
+                    }
+
+                    if (result.normalized_phone && phoneInput) {
+                        phoneInput.value = result.normalized_phone;
+                    }
+
+                    showPhoneVerificationFeedback('success', result.message);
+                    setVerificationStatus(result.status_type || 'success', result.message || '');
+                    setDevelopmentOtpPreview(result.temporary_code || '');
+
+                    if (result.already_verified) {
+                        verifiedPhone = result.normalized_phone || currentPhone;
+                        hasPendingPhoneVerification = false;
+                        pendingVerificationPhone = '';
+                        syncVerifyPhoneUi();
+                        return;
+                    }
+
+                    hasPendingPhoneVerification = !!result.show_modal;
+                    pendingVerificationPhone = result.normalized_phone || currentPhone;
+                    syncVerifyPhoneUi();
+
+                    if (result.show_modal) {
+                        openVerificationModal('phone', result.masked_destination || result.masked_phone || (result.normalized_phone || currentPhone), false);
+                    }
+                } catch (error) {
+                    showPhoneVerificationFeedback('danger', error.message || 'Unable to send the SMS verification code right now. Please try again later.');
+                } finally {
+                    verifyPhoneBtn.disabled = false;
+                    verifyPhoneBtn.innerHTML = originalButtonHtml;
+                    syncVerifyPhoneUi();
+                }
+            });
+
+            phoneInput.addEventListener('input', function() {
+                const currentPhone = normalizePhoneValue(phoneInput.value);
+                const pendingPhone = normalizePhoneValue(pendingVerificationPhone);
+
+                if (phoneInput.value.trim() === '' || (pendingPhone !== '' && currentPhone !== pendingPhone)) {
+                    hasPendingPhoneVerification = false;
+                    pendingVerificationPhone = '';
+                    showPhoneVerificationFeedback('secondary', '');
+                    setVerificationStatus('success', '');
+                    setDevelopmentOtpPreview('');
+
+                    if (!hasPendingRegistration && modalInstance) {
+                        modalInstance.hide();
+                    }
+                }
+
+                if (currentPhone === '' || currentPhone !== normalizePhoneValue(verifiedPhone)) {
+                    setVerificationStatus('success', '');
+                    setDevelopmentOtpPreview('');
+                }
+
+                syncVerifyPhoneUi();
+            });
+        }
+
+        registerForm.addEventListener('submit', function(e) {
+            const role = document.getElementById('roleInput').value;
+            const studentStaffId = document.getElementById('student_staff_id').value;
+            const currentEmail = normalizeEmailValue(emailInput ? emailInput.value : '');
+            const currentPhone = normalizePhoneValue(phoneInput ? phoneInput.value : '');
+
+            if (!isEmailVerifiedForCurrentInput()) {
+                e.preventDefault();
+                showEmailVerificationFeedback('warning', 'Please verify your email first using the Verify Email button.');
+                emailInput.focus();
+                return false;
+            }
+
+            if (!isPhoneVerifiedForCurrentInput()) {
+                e.preventDefault();
+                showPhoneVerificationFeedback('warning', 'Please verify your phone number first using the Verify Phone button.');
+                phoneInput.focus();
+                return false;
+            }
+
+            if (phoneInput && currentPhone !== '') {
+                phoneInput.value = currentPhone;
+            }
+
+            validatePassword();
+
+            if (!studentStaffId.trim()) {
+                e.preventDefault();
+                alert(role === 'student' ? 'Please enter your Student ID' : 'Please enter your Staff ID');
+                return false;
+            }
+        });
+
+        if (emailVerificationModal) {
             emailVerificationModal.addEventListener('shown.bs.modal', function () {
                 const verificationCodeInput = document.getElementById('verification_code');
                 if (verificationCodeInput) {
                     verificationCodeInput.focus();
                 }
-            }, { once: true });
+            });
+        }
+
+        syncVerifyEmailUi();
+        syncVerifyPhoneUi();
+        setDevelopmentOtpPreview(initialDevelopmentCode);
+
+        <?php if ($showVerificationModal): ?>
+        if (modalInstance) {
+            openVerificationModal(initialModalTarget, initialModalDestination, <?= $verificationModalIsRegistrationFlow ? 'true' : 'false' ?>);
         }
         <?php endif; ?>
     </script>

@@ -226,7 +226,14 @@ buildConfigField "String", "API_BASE_URL", "\"http://192.168.1.20/reclaim-system
    - `SMTP_PASSWORD`
    - optional `MAIL_FROM_EMAIL`
    - optional `MAIL_FROM_NAME`
-5. Open the site:
+5. Confirm SMS settings in `.env` / environment variables for phone verification:
+   - `SMS_PROVIDER=twilio`
+   - `TWILIO_ACCOUNT_SID`
+   - `TWILIO_AUTH_TOKEN`
+   - either `TWILIO_FROM_NUMBER` or `TWILIO_MESSAGING_SERVICE_SID`
+   - optional `SMS_FALLBACK_TO_PREVIEW=true` for local development only
+   - optional `SMS_EXPOSE_PREVIEW_CODE=true` to show temporary OTP codes outside live delivery
+6. Open the site:
    - `http://localhost/reclaim-system/`
 
 The mobile token table is created automatically when a mobile API route is used.
