@@ -396,23 +396,20 @@ function isConfidentStoredImageMatch(array $match) {
         return false;
     }
 
-    $finalScore = (float) ($match['final_score'] ?? $match['similarity_percentage'] ?? 0);
-    $imageScore = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
-    $imaggaScore = (float) ($match['imagga_score'] ?? 0);
-    $jaccardScore = (float) ($match['jaccard_score'] ?? 0);
+    $finalScore    = (float) ($match['final_score'] ?? $match['similarity_percentage'] ?? 0);
+    $imageScore    = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
+    $imaggaScore   = (float) ($match['imagga_score'] ?? 0);
+    $jaccardScore  = (float) ($match['jaccard_score'] ?? 0);
     $categoryScore = (float) ($match['category_score'] ?? 0);
-    $orbScore = (float) ($match['orb_score'] ?? 0);
+    $orbScore      = (float) ($match['orb_score'] ?? 0);
     $histogramScore = (float) ($match['histogram_score'] ?? 0);
-    $shapeScore = (float) ($match['shape_score'] ?? 0);
+    $shapeScore    = (float) ($match['shape_score'] ?? 0);
     $verifiedMatches = (int) ($match['verified_matches'] ?? 0);
-    $matchedTags = $match['matched_tags'] ?? [];
-    $hasVerifiedVisualEvidence = $verifiedMatches >= 5 && $orbScore >= 15 && $imageScore >= 25;
+    $matchedTags   = $match['matched_tags'] ?? [];
+    $sameObjectFamily = !empty($match['family_allowed']);
+
+    $hasVerifiedVisualEvidence    = $verifiedMatches >= 5 && $orbScore >= 15 && $imageScore >= 25;
     $hasStrongColorShapeAgreement = $imageScore >= 35 && $histogramScore >= 55 && $shapeScore >= 60;
-
-    if ($imageScore < MIN_IMAGE_RESULT_SCORE && !($finalScore >= 55 && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement))) {
-        return false;
-    }
-
     $strongVisual = (
         ($imageScore >= 70 && $verifiedMatches >= 5 && $orbScore >= 30)
         || ($imageScore >= 60 && $verifiedMatches >= 6 && $orbScore >= 25)
@@ -420,21 +417,30 @@ function isConfidentStoredImageMatch(array $match) {
         || ($imageScore >= 55 && $verifiedMatches >= 8 && $orbScore >= 25)
     );
 
-    $strongSemantic = (
-        $imaggaScore >= 60
-        || ($imaggaScore >= 45 && $jaccardScore >= 12 && ($categoryScore >= 100 || !empty($matchedTags)))
-    );
-    $semanticSupportedByVisual = $strongSemantic
-        && ($imageScore >= 55 || $hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement);
+    // Visual paths
+    if ($strongVisual) return true;
+    if ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement) {
+        return $finalScore >= 45;
+    }
 
-    $sameObjectFamily = !empty($match['family_allowed']);
-    $familySemanticMatch = (
-        $sameObjectFamily
-        && ($hasVerifiedVisualEvidence || $hasStrongColorShapeAgreement)
-    );
+    // Semantic paths — work without OpenCV
+    if ($imaggaScore >= 40 && ($jaccardScore >= 10 || $categoryScore >= 100 || count($matchedTags) >= 2)) {
+        return true;
+    }
+    if ($categoryScore >= 100 && $jaccardScore >= 8) {
+        return true;
+    }
+    if ($jaccardScore >= 20) {
+        return true;
+    }
+    if ($sameObjectFamily && ($imaggaScore >= 25 || $jaccardScore >= 8 || !empty($matchedTags))) {
+        return true;
+    }
+    if ($finalScore >= 45 && ($imaggaScore >= 25 || $jaccardScore >= 10)) {
+        return true;
+    }
 
-    return ($sameObjectFamily && ($strongVisual || $semanticSupportedByVisual || $familySemanticMatch))
-        || (empty($match['uploaded_object_families'] ?? []) && ($strongVisual || $semanticSupportedByVisual));
+    return false;
 }
 
 function getMatchLevel($score) {
@@ -447,8 +453,19 @@ function getMatchLevel($score) {
 
 function calculateStoredDisplaySimilarityScore(array $match): float
 {
-    $imageScore = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
-    return max(0.0, min(100.0, $imageScore));
+    $imageScore    = (float) ($match['visual_score'] ?? $match['image_score'] ?? 0);
+    $finalScore    = (float) ($match['final_score'] ?? 0);
+    $imaggaScore   = (float) ($match['imagga_score'] ?? 0);
+    $jaccardScore  = (float) ($match['jaccard_score'] ?? 0);
+    $categoryScore = (float) ($match['category_score'] ?? 0);
+
+    // When OpenCV is unavailable, derive display score from semantic signals
+    if ($imageScore < 5.0) {
+        $semanticScore = ($imaggaScore * 0.55) + ($jaccardScore * 0.30) + ($categoryScore * 0.15);
+        return max(0.0, min(100.0, max($semanticScore, $finalScore)));
+    }
+
+    return max(0.0, min(100.0, max($imageScore, ($finalScore * 0.85) + ($imageScore * 0.15))));
 }
 
 function calculateRelatedCategoryScore(array $referenceMatch, array $candidateItem): float
